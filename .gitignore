@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Test artifacts
+tests/*.png
+tests/*.jpg
+tests/*.mp4
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude project memory
+.claude/
+
+# Markdown (internal docs) — sauf README
+*.md
+!README.md
+
+# Audio / video (fichiers de travail locaux)
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.aiff
+*.aif
+
+# Exports vidéo
+*.mp4
+
+# Logs
+*.log
