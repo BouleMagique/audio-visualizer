@@ -85,7 +85,11 @@ TUNNEL_KICK_ZOOM        = 1.0   # kick zoom intensity multiplier
 TUNNEL_CHROMA           = 1.0   # chromatic aberration strength multiplier
 TUNNEL_KICK_SENSITIVITY = 2.0   # multiplier on raw kick value before clamping
 TUNNEL_BASS_SPEED       = 2.5   # bass reactivity on tunnel advance speed
-TUNNEL_KICK_MODE        = 0     # 0 = delta, 1 = adaptive threshold
+TUNNEL_KICK_MODE        = 0     # 0=delta 1=adaptive 2=kick spectral 3=freq seuil
+TUNNEL_KICK_FREQ_LO     = 0     # band lower bound as % of num_bars
+TUNNEL_KICK_FREQ_HI     = 12    # band upper bound as % of num_bars (~sub-bass)
+TUNNEL_KICK_THRESHOLD   = 250   # ×0.01 → mode 2: ratio×BG (2.5×), mode 3: abs (0-1)
+TUNNEL_KICK_COOLDOWN    = 20    # refractory period in frames
 
 BG_PULSE_INTENSITY = 0.5   # BG zoom depth on kick (0-1)
 FLASH_INTENSITY    = 0.5   # white flash opacity on kick (0-1)

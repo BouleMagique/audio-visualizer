@@ -24,6 +24,8 @@ from config.defaults import (
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
+    TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
+    TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -62,6 +64,10 @@ class ExportWorker(QObject):
                  tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                  tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                  tunnel_kick_mode: int = TUNNEL_KICK_MODE,
+                 tunnel_kick_freq_lo: int = TUNNEL_KICK_FREQ_LO,
+                 tunnel_kick_freq_hi: int = TUNNEL_KICK_FREQ_HI,
+                 tunnel_kick_threshold: float = TUNNEL_KICK_THRESHOLD / 100.0,
+                 tunnel_kick_cooldown: int = TUNNEL_KICK_COOLDOWN,
                  mirror: bool = False,
                  pal_mode: int = 0,
                  bg_pulse: bool = False, bg_pulse_intensity: float = 0.5,
@@ -96,6 +102,10 @@ class ExportWorker(QObject):
             tunnel_kick_sensitivity=tunnel_kick_sensitivity,
             tunnel_bass_speed=tunnel_bass_speed,
             tunnel_kick_mode=tunnel_kick_mode,
+            tunnel_kick_freq_lo=tunnel_kick_freq_lo,
+            tunnel_kick_freq_hi=tunnel_kick_freq_hi,
+            tunnel_kick_threshold=tunnel_kick_threshold,
+            tunnel_kick_cooldown=tunnel_kick_cooldown,
             mirror=mirror,
             pal_mode=pal_mode,
             bg_pulse=bg_pulse,
@@ -426,10 +436,24 @@ class MainWindow(QMainWindow):
         tg_f.addRow("Côtés", self._combo_tunnel_sides)
 
         self._combo_tunnel_kick_mode = QComboBox()
-        self._combo_tunnel_kick_mode.addItems(["Delta", "Seuil adaptatif"])
+        self._combo_tunnel_kick_mode.addItems([
+            "Delta", "Seuil adaptatif", "Kick spectral", "Fréquence seuil"])
         self._combo_tunnel_kick_mode.setCurrentIndex(TUNNEL_KICK_MODE)
-        self._combo_tunnel_kick_mode.currentIndexChanged.connect(self._on_params_changed)
+        self._combo_tunnel_kick_mode.currentIndexChanged.connect(self._on_tunnel_kick_mode_changed)
         tg_f.addRow("Détection", self._combo_tunnel_kick_mode)
+
+        self._row_tunnel_kick_freq_lo = self._make_slider_row(
+            tg_f, "Bande lo (%)", 0, 49, TUNNEL_KICK_FREQ_LO, self._on_params_changed)
+        self._row_tunnel_kick_freq_hi = self._make_slider_row(
+            tg_f, "Bande hi (%)", 1, 50, TUNNEL_KICK_FREQ_HI, self._on_params_changed)
+        self._row_tunnel_kick_threshold = self._make_slider_row(
+            tg_f, "Seuil (×0.01)", 10, 800, TUNNEL_KICK_THRESHOLD, self._on_params_changed)
+        self._row_tunnel_kick_cooldown = self._make_slider_row(
+            tg_f, "Cooldown (frames)", 5, 120, TUNNEL_KICK_COOLDOWN, self._on_params_changed)
+
+        for _r in (self._row_tunnel_kick_freq_lo, self._row_tunnel_kick_freq_hi,
+                   self._row_tunnel_kick_threshold, self._row_tunnel_kick_cooldown):
+            self._set_row_visible(_r, False)
 
         self._row_tunnel_rings = self._make_slider_row(
             tg_f, "Anneaux", 1, 16, TUNNEL_RINGS, self._on_params_changed)
@@ -729,6 +753,10 @@ class MainWindow(QMainWindow):
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
             tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
             tunnel_kick_mode=self._combo_tunnel_kick_mode.currentIndex(),
+            tunnel_kick_freq_lo=self._sl(self._row_tunnel_kick_freq_lo).value(),
+            tunnel_kick_freq_hi=self._sl(self._row_tunnel_kick_freq_hi).value(),
+            tunnel_kick_threshold=self._sl(self._row_tunnel_kick_threshold).value() / 100.0,
+            tunnel_kick_cooldown=self._sl(self._row_tunnel_kick_cooldown).value(),
             mirror=self._chk_mirror.isChecked(),
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
@@ -747,6 +775,15 @@ class MainWindow(QMainWindow):
             if self._playback_thread and self._playback_thread.isRunning():
                 self._playback_thread.update_fft(new_fft)
             self._fft = new_fft
+
+    def _on_tunnel_kick_mode_changed(self):
+        mode = self._combo_tunnel_kick_mode.currentIndex()
+        advanced = mode in (2, 3)
+        self._set_row_visible(self._row_tunnel_kick_freq_lo,   advanced)
+        self._set_row_visible(self._row_tunnel_kick_freq_hi,   advanced)
+        self._set_row_visible(self._row_tunnel_kick_threshold, advanced)
+        self._set_row_visible(self._row_tunnel_kick_cooldown,  advanced)
+        self._on_params_changed()
 
     def _on_volume_changed(self, val: int):
         self._volume = val / 100.0
@@ -869,6 +906,10 @@ class MainWindow(QMainWindow):
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
             tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
             tunnel_kick_mode=self._combo_tunnel_kick_mode.currentIndex(),
+            tunnel_kick_freq_lo=self._sl(self._row_tunnel_kick_freq_lo).value(),
+            tunnel_kick_freq_hi=self._sl(self._row_tunnel_kick_freq_hi).value(),
+            tunnel_kick_threshold=self._sl(self._row_tunnel_kick_threshold).value() / 100.0,
+            tunnel_kick_cooldown=self._sl(self._row_tunnel_kick_cooldown).value(),
             mirror=self._chk_mirror.isChecked(),
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),

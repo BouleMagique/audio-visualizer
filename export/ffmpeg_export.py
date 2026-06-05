@@ -14,6 +14,8 @@ from config.defaults import (
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
+    TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
+    TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     CQT_BINS_PER_OCTAVE, BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -49,6 +51,10 @@ class FFmpegExporter:
                  tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                  tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                  tunnel_kick_mode: int = TUNNEL_KICK_MODE,
+                 tunnel_kick_freq_lo: int = TUNNEL_KICK_FREQ_LO,
+                 tunnel_kick_freq_hi: int = TUNNEL_KICK_FREQ_HI,
+                 tunnel_kick_threshold: float = TUNNEL_KICK_THRESHOLD / 100.0,
+                 tunnel_kick_cooldown: int = TUNNEL_KICK_COOLDOWN,
                  mirror: bool = False,
                  pal_mode: int = 0,
                  bg_pulse: bool = False,
@@ -85,6 +91,10 @@ class FFmpegExporter:
         self.tunnel_kick_sensitivity = tunnel_kick_sensitivity
         self.tunnel_bass_speed = tunnel_bass_speed
         self.tunnel_kick_mode = tunnel_kick_mode
+        self.tunnel_kick_freq_lo = tunnel_kick_freq_lo
+        self.tunnel_kick_freq_hi = tunnel_kick_freq_hi
+        self.tunnel_kick_threshold = tunnel_kick_threshold
+        self.tunnel_kick_cooldown = tunnel_kick_cooldown
         self.mirror = mirror
         self.pal_mode = pal_mode
         self.bg_pulse = bg_pulse
@@ -172,6 +182,10 @@ class FFmpegExporter:
                     tunnel_kick_sensitivity=self.tunnel_kick_sensitivity,
                     tunnel_bass_speed=self.tunnel_bass_speed,
                     tunnel_kick_mode=self.tunnel_kick_mode,
+                    tunnel_kick_freq_lo=self.tunnel_kick_freq_lo,
+                    tunnel_kick_freq_hi=self.tunnel_kick_freq_hi,
+                    tunnel_kick_threshold=self.tunnel_kick_threshold,
+                    tunnel_kick_cooldown=self.tunnel_kick_cooldown,
                     mirror=self.mirror,
                     pal_mode=self.pal_mode,
                     bg_pulse=self.bg_pulse,

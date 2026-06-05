@@ -9,6 +9,8 @@ from config.defaults import (
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
+    TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
+    TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 from render.modes import HaloSineMode
@@ -37,6 +39,7 @@ class Renderer:
         self._kick_accum: float = 0.0
         self._kick_bass_buf: "deque" = None   # lazy init
         self._kick_cooldown: int = 0
+        self._kick_bg_ema: float = 0.0
         self._bass_hist_tex: moderngl.Texture | None = None
         self._bass_history: np.ndarray | None = None
         self._bass_hist2_tex: moderngl.Texture | None = None
@@ -150,6 +153,10 @@ class Renderer:
                      tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                      tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                      tunnel_kick_mode: int = TUNNEL_KICK_MODE,
+                     tunnel_kick_freq_lo: int = TUNNEL_KICK_FREQ_LO,
+                     tunnel_kick_freq_hi: int = TUNNEL_KICK_FREQ_HI,
+                     tunnel_kick_threshold: float = TUNNEL_KICK_THRESHOLD / 100.0,
+                     tunnel_kick_cooldown: int = TUNNEL_KICK_COOLDOWN,
                      mirror: bool = False,
                      pal_mode: int = 0,
                      bg_pulse: bool = False,
@@ -239,8 +246,14 @@ class Renderer:
         bass_v = float(np.mean(bar_sl[:n_bass]))
         mid_v  = float(np.mean(bar_sl[n_bass:n_mid]))
         high_v = float(np.mean(bar_sl[n_mid:]) if n_mid < n_used else 0.0)
+        # Band slice shared by modes 2 & 3
+        i_lo  = max(0, int(n_used * tunnel_kick_freq_lo / 100.0))
+        i_hi  = max(i_lo + 1, int(n_used * tunnel_kick_freq_hi / 100.0))
+        band  = bar_sl[i_lo:i_hi] if i_hi <= n_used else bar_sl[i_lo:]
+        band_energy = float(band.max()) if len(band) > 0 else 0.0
+
         if tunnel_kick_mode == 1:
-            # Adaptive threshold: fire when bass exceeds 75% of rolling max, with cooldown
+            # Adaptive threshold: fire when bass ≥ 75% of rolling max
             from collections import deque
             if self._kick_bass_buf is None:
                 self._kick_bass_buf = deque(maxlen=90)
@@ -248,15 +261,41 @@ class Renderer:
             if self._kick_cooldown > 0:
                 self._kick_cooldown -= 1
             rolling_max = max(self._kick_bass_buf) if self._kick_bass_buf else 1e-6
-            threshold   = rolling_max * 0.75
-            if bass_v >= threshold and self._kick_cooldown == 0 and rolling_max > 1e-4:
+            if bass_v >= rolling_max * 0.75 and self._kick_cooldown == 0 and rolling_max > 1e-4:
                 kick_n = float(np.clip(bass_v / max(rolling_max, 1e-6) * tunnel_kick_sensitivity, 0.0, 1.0))
-                self._kick_cooldown = 15   # ~250ms at 60fps
+                self._kick_cooldown = 15
             else:
                 kick_n = 0.0
+
+        elif tunnel_kick_mode == 2:
+            # Kick spectral (onset detector) — designed for techno/hardcore
+            # Slow background EMA (τ ≈ 2s at 60fps), fast attack comparison
+            bg_alpha = 0.03
+            self._kick_bg_ema = self._kick_bg_ema * (1.0 - bg_alpha) + band_energy * bg_alpha
+            if self._kick_cooldown > 0:
+                self._kick_cooldown -= 1
+            ratio = band_energy / max(self._kick_bg_ema, 1e-5)
+            if ratio >= tunnel_kick_threshold and self._kick_cooldown == 0:
+                kick_n = float(np.clip((ratio / max(tunnel_kick_threshold, 1e-3) - 1.0)
+                                       * tunnel_kick_sensitivity, 0.0, 1.0))
+                self._kick_cooldown = tunnel_kick_cooldown
+            else:
+                kick_n = 0.0
+
+        elif tunnel_kick_mode == 3:
+            # Fréquence seuil: trigger when band energy exceeds absolute threshold
+            if self._kick_cooldown > 0:
+                self._kick_cooldown -= 1
+            if band_energy >= tunnel_kick_threshold and self._kick_cooldown == 0:
+                kick_n = float(np.clip(band_energy * tunnel_kick_sensitivity, 0.0, 1.0))
+                self._kick_cooldown = tunnel_kick_cooldown
+            else:
+                kick_n = 0.0
+
         else:
-            # Delta mode (default): react to sudden bass jumps
+            # Mode 0 — Delta: react to sudden bass jumps
             kick_n = float(np.clip((bass_v - self._prev_bass * 1.3) * 4.0 * tunnel_kick_sensitivity, 0.0, 1.0))
+
         self._prev_bass  = bass_v
         self._kick_accum = max(kick_n, self._kick_accum * 0.88)
         self.prog["u_bass"].value          = bass_v
