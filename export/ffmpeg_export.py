@@ -13,7 +13,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
-    TUNNEL_KICK_SENSITIVITY,
+    TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED,
     CQT_BINS_PER_OCTAVE, BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -47,6 +47,7 @@ class FFmpegExporter:
                  tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM,
                  tunnel_chroma: float = TUNNEL_CHROMA,
                  tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
+                 tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                  pal_mode: int = 0,
                  bg_pulse: bool = False,
                  bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -80,6 +81,7 @@ class FFmpegExporter:
         self.tunnel_kick_zoom = tunnel_kick_zoom
         self.tunnel_chroma = tunnel_chroma
         self.tunnel_kick_sensitivity = tunnel_kick_sensitivity
+        self.tunnel_bass_speed = tunnel_bass_speed
         self.pal_mode = pal_mode
         self.bg_pulse = bg_pulse
         self.bg_pulse_intensity = bg_pulse_intensity
@@ -164,6 +166,7 @@ class FFmpegExporter:
                     tunnel_kick_zoom=self.tunnel_kick_zoom,
                     tunnel_chroma=self.tunnel_chroma,
                     tunnel_kick_sensitivity=self.tunnel_kick_sensitivity,
+                    tunnel_bass_speed=self.tunnel_bass_speed,
                     pal_mode=self.pal_mode,
                     bg_pulse=self.bg_pulse,
                     bg_pulse_intensity=self.bg_pulse_intensity,

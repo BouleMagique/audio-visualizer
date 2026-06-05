@@ -8,7 +8,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
-    TUNNEL_KICK_SENSITIVITY,
+    TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 from render.modes import HaloSineMode
@@ -146,6 +146,7 @@ class Renderer:
                      tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM,
                      tunnel_chroma: float = TUNNEL_CHROMA,
                      tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
+                     tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                      pal_mode: int = 0,
                      bg_pulse: bool = False,
                      bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -245,7 +246,8 @@ class Renderer:
         self.prog["u_tunnel_rings"].value  = int(tunnel_rings)
         self.prog["u_tunnel_speed"].value  = float(tunnel_speed)
         self.prog["u_tunnel_kick_zoom"].value = float(tunnel_kick_zoom)
-        self.prog["u_tunnel_chroma"].value = float(tunnel_chroma)
+        self.prog["u_tunnel_chroma"].value      = float(tunnel_chroma)
+        self.prog["u_tunnel_bass_speed"].value  = float(tunnel_bass_speed)
 
         # Mode 6: center image is composited AFTER the spline in PIL — skip it in GLSL
         if viz_type == 6 and self._center_pil is not None:

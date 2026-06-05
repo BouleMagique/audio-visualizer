@@ -45,6 +45,7 @@ uniform int   u_tunnel_rings;     // ring-line count
 uniform float u_tunnel_speed;     // base advance speed
 uniform float u_tunnel_kick_zoom; // zoom intensity on kick
 uniform float u_tunnel_chroma;    // chromatic aberration strength
+uniform float u_tunnel_bass_speed; // bass reactivity on speed
 
 const float PI = 3.14159265;
 
@@ -70,7 +71,7 @@ vec3 tunnelColor(vec2 uv) {
     if (d < 0.002) return vec3(0.0);
 
     float z     = 1.0 / d;
-    float speed = u_tunnel_speed + u_bass * 2.5;
+    float speed = u_tunnel_speed + u_bass * u_tunnel_bass_speed;
 
     float rt   = fract(z * float(u_tunnel_rings) - u_time * speed);
     float ring = smoothstep(0.06, 0.0, min(rt, 1.0 - rt));

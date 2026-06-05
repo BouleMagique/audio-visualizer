@@ -84,6 +84,7 @@ TUNNEL_SPEED            = 0.3   # base advance speed
 TUNNEL_KICK_ZOOM        = 1.0   # kick zoom intensity multiplier
 TUNNEL_CHROMA           = 1.0   # chromatic aberration strength multiplier
 TUNNEL_KICK_SENSITIVITY = 2.0   # multiplier on raw kick value before clamping
+TUNNEL_BASS_SPEED       = 2.5   # bass reactivity on tunnel advance speed
 
 BG_PULSE_INTENSITY = 0.5   # BG zoom depth on kick (0-1)
 FLASH_INTENSITY    = 0.5   # white flash opacity on kick (0-1)

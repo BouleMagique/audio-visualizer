@@ -23,7 +23,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
-    TUNNEL_KICK_SENSITIVITY,
+    TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -59,6 +59,7 @@ class ExportWorker(QObject):
                  tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM,
                  tunnel_chroma: float = TUNNEL_CHROMA,
                  tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
+                 tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                  pal_mode: int = 0,
                  bg_pulse: bool = False, bg_pulse_intensity: float = 0.5,
                  flash: bool = False, flash_intensity: float = 0.5):
@@ -90,6 +91,7 @@ class ExportWorker(QObject):
             tunnel_kick_zoom=tunnel_kick_zoom,
             tunnel_chroma=tunnel_chroma,
             tunnel_kick_sensitivity=tunnel_kick_sensitivity,
+            tunnel_bass_speed=tunnel_bass_speed,
             pal_mode=pal_mode,
             bg_pulse=bg_pulse,
             bg_pulse_intensity=bg_pulse_intensity,
@@ -421,6 +423,10 @@ class MainWindow(QMainWindow):
             tg_f, "Kick sens. (×0.01)", 10, 500, int(TUNNEL_KICK_SENSITIVITY * 100),
             self._on_params_changed)
 
+        self._row_tunnel_bass_speed = self._make_slider_row(
+            tg_f, "Vitesse audio (×0.01)", 0, 1000, int(TUNNEL_BASS_SPEED * 100),
+            self._on_params_changed)
+
         pl.addWidget(self._tunnel_group)
 
         # ── Effets beats ──
@@ -668,6 +674,7 @@ class MainWindow(QMainWindow):
             tunnel_kick_zoom=self._sl(self._row_tunnel_kick_zoom).value() / 100,
             tunnel_chroma=self._sl(self._row_tunnel_chroma).value() / 100,
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
+            tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
@@ -758,6 +765,7 @@ class MainWindow(QMainWindow):
             tunnel_kick_zoom=self._sl(self._row_tunnel_kick_zoom).value() / 100,
             tunnel_chroma=self._sl(self._row_tunnel_chroma).value() / 100,
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
+            tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
