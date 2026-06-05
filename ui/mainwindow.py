@@ -379,7 +379,7 @@ class MainWindow(QMainWindow):
             self._on_params_changed)
 
         self._row_hs_gap = self._make_slider_row(
-            hsf, "Distance sine (×0.01)", 100, 250, int(HALO_SINE_SPLINE_GAP * 100),
+            hsf, "Distance sine (×0.01)", 10, 250, int(HALO_SINE_SPLINE_GAP * 100),
             self._on_params_changed)
 
         pl.addWidget(self._halo_sine_group)
