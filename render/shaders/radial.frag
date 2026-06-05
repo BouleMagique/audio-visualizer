@@ -364,6 +364,52 @@ void main() {
             color = mix(color, texture(u_center_texture, clamp(uv_ctr, 0.0, 1.0)).rgb, mask);
         }
 
+    // ── Tunnel Arcade — neon rings flying toward viewer, audio-reactive ──
+    } else if (u_viz_type == 8) {
+        vec2  uv_c = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
+        float r    = max(length(uv_c), 0.0002);
+        float angle = atan(uv_c.y, uv_c.x) - u_rotation;
+        float theta = fract(angle / (2.0 * PI) + 0.5);
+
+        // Bar at this angle
+        int   bidx    = clamp(int(theta * float(u_num_bars)), 0, u_num_bars - 1);
+        float bar_val = clamp(u_bars[bidx] * u_sensitivity, 0.0, 1.0);
+
+        // Tunnel depth scroll: 1/r creates perspective, time scrolls forward
+        float speed       = 0.35 + u_pulse * u_pulse_intensity * 0.25;
+        float tunnel_v    = fract(0.25 / r - u_time * speed);
+
+        // Rings at regular depth intervals, width modulated by bar
+        float ring_phase  = fract(tunnel_v * 5.0);
+        float ring_width  = 0.07 + bar_val * 0.09;
+        float ring        = smoothstep(ring_width, 0.0, abs(ring_phase - 0.5) * 2.0);
+
+        // Distance fog: bright near (large r), dark at center vanishing point
+        float fog = r / (r + 0.25);
+
+        // Tunnel wall at boundary radius, modulated by bar amplitude
+        float wall_r = 0.48 * (1.0 + bar_val * 0.18 * u_max_bar_height
+                               + 0.07 * u_pulse * u_pulse_intensity);
+        float wall_d = abs(r - wall_r);
+        float wall   = exp(-(wall_d / 0.009) * (wall_d / 0.009));
+
+        vec3 c = col(bar_val, theta);
+        color  = bg * 0.04;
+        color += ring * c * fog * (0.7 + bar_val * 0.6);
+        color += wall * c * 1.6;
+        color += smoothstep(wall_r * 1.8, 0.0, r) * 0.14 * u_pal0;
+
+        // Center image at tunnel vanishing point
+        if (u_has_center == 1) {
+            float cr  = u_halo_r_base * (1.0 + 0.08 * u_pulse * u_pulse_intensity);
+            vec2 uv_c2 = uv_c / cr * 0.5 + 0.5;
+            float mask = smoothstep(cr, cr * 0.80, r);
+            if (uv_c2.x >= 0.0 && uv_c2.x <= 1.0 && uv_c2.y >= 0.0 && uv_c2.y <= 1.0) {
+                vec4 s = texture(u_center_texture, uv_c2);
+                color  = mix(color, s.rgb, s.a * mask);
+            }
+        }
+
     // ── Halo Sine — bg + circle ring + center image; spline drawn by PIL ──
     } else if (u_viz_type == 6) {
         vec2  uv_c = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);

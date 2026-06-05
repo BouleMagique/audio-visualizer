@@ -24,11 +24,11 @@ from config.defaults import (
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
-_RADIAL_MODES     = {0, 4, 5, 6, 7}
-_ROTATION_MODES   = {0, 4, 5, 6, 7}
-_BAR_MODES        = {0, 1, 2, 4, 5, 7}
-_HEIGHT_MODES     = {0, 1, 2, 4, 5, 7}
-_HALO_MODES       = {4, 5, 6, 7}
+_RADIAL_MODES     = {0, 4, 5, 6, 7, 8}
+_ROTATION_MODES   = {0, 4, 5, 6, 7, 8}
+_BAR_MODES        = {0, 1, 2, 4, 5, 7, 8}
+_HEIGHT_MODES     = {0, 1, 2, 4, 5, 7, 8}
+_HALO_MODES       = {4, 5, 6, 7, 8}
 _HALO_SINE_MODES  = {6}
 
 _AMP_LABELS  = ["Silence", "Faible", "Moyen", "Fort", "Saturation"]
