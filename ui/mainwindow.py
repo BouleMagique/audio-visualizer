@@ -21,15 +21,18 @@ from config.defaults import (
     FREQ_BASS_SPLIT, FREQ_BASS_SPLIT_HZ, CQT_BINS_PER_OCTAVE,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    HALO_SINE_SPLINE_GAP, BG_PULSE_INTENSITY, FLASH_INTENSITY,
+    HALO_SINE_SPLINE_GAP,
+    TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
+    BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
-_RADIAL_MODES     = {0, 4, 5, 6, 7, 8}
-_ROTATION_MODES   = {0, 4, 5, 6, 7, 8}
-_BAR_MODES        = {0, 1, 2, 4, 5, 7, 8}
-_HEIGHT_MODES     = {0, 1, 2, 4, 5, 7, 8}
-_HALO_MODES       = {4, 5, 6, 7, 8}
+_RADIAL_MODES     = {0, 4, 5, 6, 7}
+_ROTATION_MODES   = {0, 4, 5, 6, 7}
+_BAR_MODES        = {0, 1, 2, 4, 5, 7}
+_HEIGHT_MODES     = {0, 1, 2, 4, 5, 7}
+_HALO_MODES       = {4, 5, 6, 7}
 _HALO_SINE_MODES  = {6}
+_TUNNEL_MODES     = {8}
 
 _AMP_LABELS  = ["Silence", "Faible", "Moyen", "Fort", "Saturation"]
 _FREQ_LABELS = ["Grave", "Basse", "Médium", "Présence", "Aigu"]
@@ -48,6 +51,11 @@ class ExportWorker(QObject):
                  use_cqt, bins_per_octave,
                  halo_r_base, halo_amplitude, halo_n_points, halo_glow_layers,
                  halo_smoothing_decay, halo_fill_opacity, halo_spline_gap,
+                 tunnel_sides: int = TUNNEL_SIDES,
+                 tunnel_rings: int = TUNNEL_RINGS,
+                 tunnel_speed: float = TUNNEL_SPEED,
+                 tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM,
+                 tunnel_chroma: float = TUNNEL_CHROMA,
                  pal_mode: int = 0,
                  bg_pulse: bool = False, bg_pulse_intensity: float = 0.5,
                  flash: bool = False, flash_intensity: float = 0.5):
@@ -72,6 +80,11 @@ class ExportWorker(QObject):
             halo_smoothing_decay=halo_smoothing_decay,
             halo_fill_opacity=halo_fill_opacity,
             halo_spline_gap=halo_spline_gap,
+            tunnel_sides=tunnel_sides,
+            tunnel_rings=tunnel_rings,
+            tunnel_speed=tunnel_speed,
+            tunnel_kick_zoom=tunnel_kick_zoom,
+            tunnel_chroma=tunnel_chroma,
             pal_mode=pal_mode,
             bg_pulse=bg_pulse,
             bg_pulse_intensity=bg_pulse_intensity,
@@ -368,6 +381,34 @@ class MainWindow(QMainWindow):
 
         pl.addWidget(self._halo_sine_group)
 
+        # ── Tunnel Arcade ──
+        self._tunnel_group = QGroupBox("Tunnel Arcade")
+        tg_f = QFormLayout(self._tunnel_group)
+
+        self._combo_tunnel_sides = QComboBox()
+        for s in ["4", "6", "8", "12"]:
+            self._combo_tunnel_sides.addItem(s)
+        self._combo_tunnel_sides.setCurrentText(str(TUNNEL_SIDES))
+        self._combo_tunnel_sides.currentIndexChanged.connect(self._on_params_changed)
+        tg_f.addRow("Côtés", self._combo_tunnel_sides)
+
+        self._row_tunnel_rings = self._make_slider_row(
+            tg_f, "Anneaux", 1, 16, TUNNEL_RINGS, self._on_params_changed)
+
+        self._row_tunnel_speed = self._make_slider_row(
+            tg_f, "Vitesse (×0.01)", 10, 400, int(TUNNEL_SPEED * 100),
+            self._on_params_changed)
+
+        self._row_tunnel_kick_zoom = self._make_slider_row(
+            tg_f, "Kick zoom (×0.01)", 0, 300, int(TUNNEL_KICK_ZOOM * 100),
+            self._on_params_changed)
+
+        self._row_tunnel_chroma = self._make_slider_row(
+            tg_f, "Aberration (×0.01)", 0, 300, int(TUNNEL_CHROMA * 100),
+            self._on_params_changed)
+
+        pl.addWidget(self._tunnel_group)
+
         # ── Effets beats ──
         beats_g = QGroupBox("Effets beats")
         beats_f = QFormLayout(beats_g)
@@ -447,6 +488,7 @@ class MainWindow(QMainWindow):
         has_height   = viz_type in _HEIGHT_MODES
         is_halo      = viz_type in _HALO_MODES
         is_halo_sine = viz_type in _HALO_SINE_MODES
+        is_tunnel    = viz_type in _TUNNEL_MODES
 
         self._set_row_visible(self._row_bars,      is_bar)
         self._set_row_visible(self._row_height,    has_height)
@@ -454,6 +496,7 @@ class MainWindow(QMainWindow):
         self._set_row_visible(self._row_rotation,  has_rotation)
         self._center_group.setVisible(is_halo)
         self._halo_sine_group.setVisible(is_halo_sine)
+        self._tunnel_group.setVisible(is_tunnel)
         pal_name = self._combo_palette.currentText()
         self._custom_amp_group.setVisible(pal_name == "Perso. Amplitude")
         self._custom_freq_group.setVisible(pal_name == "Perso. Fréquence")
@@ -604,6 +647,11 @@ class MainWindow(QMainWindow):
             halo_smoothing_decay=self._sl(self._row_hs_decay).value() / 100,
             halo_fill_opacity=self._sl(self._row_hs_fill).value() / 100,
             halo_spline_gap=self._sl(self._row_hs_gap).value() / 100,
+            tunnel_sides=int(self._combo_tunnel_sides.currentText()),
+            tunnel_rings=self._sl(self._row_tunnel_rings).value(),
+            tunnel_speed=self._sl(self._row_tunnel_speed).value() / 100,
+            tunnel_kick_zoom=self._sl(self._row_tunnel_kick_zoom).value() / 100,
+            tunnel_chroma=self._sl(self._row_tunnel_chroma).value() / 100,
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
@@ -687,6 +735,11 @@ class MainWindow(QMainWindow):
             halo_smoothing_decay=self._sl(self._row_hs_decay).value() / 100,
             halo_fill_opacity=self._sl(self._row_hs_fill).value() / 100,
             halo_spline_gap=self._sl(self._row_hs_gap).value() / 100,
+            tunnel_sides=int(self._combo_tunnel_sides.currentText()),
+            tunnel_rings=self._sl(self._row_tunnel_rings).value(),
+            tunnel_speed=self._sl(self._row_tunnel_speed).value() / 100,
+            tunnel_kick_zoom=self._sl(self._row_tunnel_kick_zoom).value() / 100,
+            tunnel_chroma=self._sl(self._row_tunnel_chroma).value() / 100,
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,

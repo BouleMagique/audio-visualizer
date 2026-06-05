@@ -35,8 +35,61 @@ uniform int   u_bg_pulse_enabled;  // 1 = zoom BG on bass hits
 uniform float u_bg_pulse_intensity;
 uniform int   u_flash_enabled;     // 1 = white flash on bass hits
 uniform float u_flash_intensity;
+uniform float u_bass;             // mean energy, first 30 % of bars
+uniform float u_mid;              // mean energy, 30–70 %
+uniform float u_high;             // mean energy, 70–100 %
+uniform float u_kick;             // instantaneous kick spike [0..1]
+uniform float u_kick_accum;       // accumulated kick with decay [0..1]
+uniform int   u_tunnel_sides;     // polygon sides (4 / 6 / 8 / 12)
+uniform int   u_tunnel_rings;     // ring-line count
+uniform float u_tunnel_speed;     // base advance speed
+uniform float u_tunnel_kick_zoom; // zoom intensity on kick
+uniform float u_tunnel_chroma;    // chromatic aberration strength
 
 const float PI = 3.14159265;
+
+// ── HSV → RGB ────────────────────────────────────────────────────
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+// ── Tunnel Arcade helpers ─────────────────────────────────────────
+float polyInradius(vec2 p, float n) {
+    float k  = 2.0 * PI / n;
+    float a  = atan(p.y, p.x);
+    float af = floor(a / k + 0.5) * k;
+    return dot(p, vec2(cos(af), sin(af)));
+}
+
+vec3 tunnelColor(vec2 uv) {
+    float n   = float(u_tunnel_sides);
+    float k   = 2.0 * PI / n;
+    float d   = polyInradius(uv, n);
+    if (d < 0.002) return vec3(0.0);
+
+    float z     = 1.0 / d;
+    float speed = u_tunnel_speed + u_bass * 2.5;
+
+    float rt   = fract(z * float(u_tunnel_rings) - u_time * speed);
+    float ring = smoothstep(0.06, 0.0, min(rt, 1.0 - rt));
+
+    float a     = atan(uv.y, uv.x);
+    float af2   = mod(a + k * 0.5, k);
+    float ef    = af2 / k;
+    float ew    = 0.022 + u_mid * 0.04;
+    float edge  = smoothstep(ew, 0.0, min(ef, 1.0 - ef));
+
+    float intersect = ring * edge * 2.5;
+
+    float hue  = fract(u_time * 0.04 + u_bass * 0.25);
+    vec3 bcol  = hsv2rgb(vec3(hue, 0.75 + u_high * 0.25, 1.0));
+
+    float fog    = clamp(z * 0.35, 0.0, 1.0);
+    float bright = (ring * 0.7 + edge * 0.8 + intersect) * fog;
+    return bcol * bright;
+}
 
 // ── palette ──────────────────────────────────────────────────────
 vec3 pal(float t) {
@@ -364,51 +417,24 @@ void main() {
             color = mix(color, texture(u_center_texture, clamp(uv_ctr, 0.0, 1.0)).rgb, mask);
         }
 
-    // ── Tunnel Arcade — neon rings flying toward viewer, audio-reactive ──
+    // ── Tunnel Arcade — wireframe polygon tunnel, fragment-shader only ──
     } else if (u_viz_type == 8) {
-        vec2  uv_c = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
-        float r    = max(length(uv_c), 0.0002);
-        float angle = atan(uv_c.y, uv_c.x) - u_rotation;
-        float theta = fract(angle / (2.0 * PI) + 0.5);
+        vec2 uv = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
 
-        // Bar at this angle
-        int   bidx    = clamp(int(theta * float(u_num_bars)), 0, u_num_bars - 1);
-        float bar_val = clamp(u_bars[bidx] * u_sensitivity, 0.0, 1.0);
+        float kick  = u_kick_accum * u_tunnel_kick_zoom;
+        uv = uv / (1.0 + kick * 4.5);
+        uv.x += kick * 0.035 * sin(u_time * 29.3);
 
-        // Tunnel depth scroll: 1/r creates perspective, time scrolls forward
-        float speed       = 0.35 + u_pulse * u_pulse_intensity * 0.25;
-        float tunnel_v    = fract(0.25 / r - u_time * speed);
+        float chroma = kick * u_tunnel_chroma * 0.014;
+        vec3 tr = tunnelColor(uv + vec2(chroma, 0.0));
+        vec3 tg = tunnelColor(uv);
+        vec3 tb = tunnelColor(uv - vec2(chroma, 0.0));
+        color = vec3(tr.r, tg.g, tb.b) + bg * 0.12;
 
-        // Rings at regular depth intervals, width modulated by bar
-        float ring_phase  = fract(tunnel_v * 5.0);
-        float ring_width  = 0.07 + bar_val * 0.09;
-        float ring        = smoothstep(ring_width, 0.0, abs(ring_phase - 0.5) * 2.0);
+        color = mix(color, vec3(0.65, 0.2, 1.0), clamp(kick * 0.55, 0.0, 0.45));
+        color += vec3(1.0) * clamp(u_kick * 0.30, 0.0, 0.28);
 
-        // Distance fog: bright near (large r), dark at center vanishing point
-        float fog = r / (r + 0.25);
-
-        // Tunnel wall at boundary radius, modulated by bar amplitude
-        float wall_r = 0.48 * (1.0 + bar_val * 0.18 * u_max_bar_height
-                               + 0.07 * u_pulse * u_pulse_intensity);
-        float wall_d = abs(r - wall_r);
-        float wall   = exp(-(wall_d / 0.009) * (wall_d / 0.009));
-
-        vec3 c = col(bar_val, theta);
-        color  = bg * 0.04;
-        color += ring * c * fog * (0.7 + bar_val * 0.6);
-        color += wall * c * 1.6;
-        color += smoothstep(wall_r * 1.8, 0.0, r) * 0.14 * u_pal0;
-
-        // Center image at tunnel vanishing point
-        if (u_has_center == 1) {
-            float cr  = u_halo_r_base * (1.0 + 0.08 * u_pulse * u_pulse_intensity);
-            vec2 uv_c2 = uv_c / cr * 0.5 + 0.5;
-            float mask = smoothstep(cr, cr * 0.80, r);
-            if (uv_c2.x >= 0.0 && uv_c2.x <= 1.0 && uv_c2.y >= 0.0 && uv_c2.y <= 1.0) {
-                vec4 s = texture(u_center_texture, uv_c2);
-                color  = mix(color, s.rgb, s.a * mask);
-            }
-        }
+        color *= 0.92 + 0.08 * sin(v_uv.y * 900.0 * PI);
 
     // ── Halo Sine — bg + circle ring + center image; spline drawn by PIL ──
     } else if (u_viz_type == 6) {

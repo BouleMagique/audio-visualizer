@@ -11,7 +11,9 @@ from config.defaults import (
     RESOLUTIONS, FPS, FFT_SIZE, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    HALO_SINE_SPLINE_GAP, CQT_BINS_PER_OCTAVE, BG_PULSE_INTENSITY, FLASH_INTENSITY,
+    HALO_SINE_SPLINE_GAP,
+    TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
+    CQT_BINS_PER_OCTAVE, BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
 
@@ -37,6 +39,11 @@ class FFmpegExporter:
                  halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY,
                  halo_fill_opacity: float = HALO_SINE_FILL_OPACITY,
                  halo_spline_gap: float = HALO_SINE_SPLINE_GAP,
+                 tunnel_sides: int = TUNNEL_SIDES,
+                 tunnel_rings: int = TUNNEL_RINGS,
+                 tunnel_speed: float = TUNNEL_SPEED,
+                 tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM,
+                 tunnel_chroma: float = TUNNEL_CHROMA,
                  pal_mode: int = 0,
                  bg_pulse: bool = False,
                  bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -63,6 +70,11 @@ class FFmpegExporter:
         self.halo_smoothing_decay = halo_smoothing_decay
         self.halo_fill_opacity = halo_fill_opacity
         self.halo_spline_gap = halo_spline_gap
+        self.tunnel_sides = tunnel_sides
+        self.tunnel_rings = tunnel_rings
+        self.tunnel_speed = tunnel_speed
+        self.tunnel_kick_zoom = tunnel_kick_zoom
+        self.tunnel_chroma = tunnel_chroma
         self.pal_mode = pal_mode
         self.bg_pulse = bg_pulse
         self.bg_pulse_intensity = bg_pulse_intensity
@@ -140,6 +152,11 @@ class FFmpegExporter:
                     halo_smoothing_decay=self.halo_smoothing_decay,
                     halo_fill_opacity=self.halo_fill_opacity,
                     halo_spline_gap=self.halo_spline_gap,
+                    tunnel_sides=self.tunnel_sides,
+                    tunnel_rings=self.tunnel_rings,
+                    tunnel_speed=self.tunnel_speed,
+                    tunnel_kick_zoom=self.tunnel_kick_zoom,
+                    tunnel_chroma=self.tunnel_chroma,
                     pal_mode=self.pal_mode,
                     bg_pulse=self.bg_pulse,
                     bg_pulse_intensity=self.bg_pulse_intensity,

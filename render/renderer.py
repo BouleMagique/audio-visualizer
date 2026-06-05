@@ -6,7 +6,9 @@ from config.defaults import (
     CIRCLE_RADIUS_RATIO, BAR_WIDTH, PALETTES, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    HALO_SINE_SPLINE_GAP, BG_PULSE_INTENSITY, FLASH_INTENSITY,
+    HALO_SINE_SPLINE_GAP,
+    TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
+    BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 from render.modes import HaloSineMode
 
@@ -30,6 +32,8 @@ class Renderer:
         self._bg_texture: moderngl.Texture | None = None
         self._center_texture: moderngl.Texture | None = None
         self._center_pil: "Image.Image | None" = None
+        self._prev_bass: float = 0.0
+        self._kick_accum: float = 0.0
         self._bass_hist_tex: moderngl.Texture | None = None
         self._bass_history: np.ndarray | None = None
         self._bass_hist2_tex: moderngl.Texture | None = None
@@ -134,6 +138,11 @@ class Renderer:
                      halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY,
                      halo_fill_opacity: float = HALO_SINE_FILL_OPACITY,
                      halo_spline_gap: float = HALO_SINE_SPLINE_GAP,
+                     tunnel_sides: int = TUNNEL_SIDES,
+                     tunnel_rings: int = TUNNEL_RINGS,
+                     tunnel_speed: float = TUNNEL_SPEED,
+                     tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM,
+                     tunnel_chroma: float = TUNNEL_CHROMA,
                      pal_mode: int = 0,
                      bg_pulse: bool = False,
                      bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -212,6 +221,28 @@ class Renderer:
         self._bass_hist2_tex.write(self._bass_history2.tobytes())
         self._bass_hist2_tex.use(location=3)
         self.prog["u_bass_history2"].value = 3
+
+        # Audio band decomposition + kick detection (Tunnel Arcade)
+        n_used = min(len(bars), num_bars)
+        bar_sl = bars[:n_used] if n_used > 0 else np.zeros(1, dtype="f4")
+        n_bass = max(1, int(n_used * 0.30))
+        n_mid  = max(n_bass + 1, int(n_used * 0.70))
+        bass_v = float(np.mean(bar_sl[:n_bass]))
+        mid_v  = float(np.mean(bar_sl[n_bass:n_mid]))
+        high_v = float(np.mean(bar_sl[n_mid:]) if n_mid < n_used else 0.0)
+        kick_n = float(np.clip((bass_v - self._prev_bass * 1.3) * 4.0, 0.0, 1.0))
+        self._prev_bass  = bass_v
+        self._kick_accum = max(kick_n, self._kick_accum * 0.88)
+        self.prog["u_bass"].value          = bass_v
+        self.prog["u_mid"].value           = mid_v
+        self.prog["u_high"].value          = high_v
+        self.prog["u_kick"].value          = kick_n
+        self.prog["u_kick_accum"].value    = float(self._kick_accum)
+        self.prog["u_tunnel_sides"].value  = int(tunnel_sides)
+        self.prog["u_tunnel_rings"].value  = int(tunnel_rings)
+        self.prog["u_tunnel_speed"].value  = float(tunnel_speed)
+        self.prog["u_tunnel_kick_zoom"].value = float(tunnel_kick_zoom)
+        self.prog["u_tunnel_chroma"].value = float(tunnel_chroma)
 
         # Mode 6: center image is composited AFTER the spline in PIL — skip it in GLSL
         if viz_type == 6 and self._center_pil is not None:

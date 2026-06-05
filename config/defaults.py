@@ -76,6 +76,13 @@ HALO_SINE_SMOOTHING_DECAY = 0.80   # per-point EMA decay (fast attack, slow rele
 HALO_SINE_FILL_OPACITY    = 0.0    # interior fill opacity (0 = no fill)
 HALO_SINE_SPLINE_GAP      = 1.4    # spline base radius as multiple of center circle radius
 
+# Tunnel Arcade mode defaults
+TUNNEL_SIDES      = 8     # polygon sides (4 / 6 / 8 / 12)
+TUNNEL_RINGS      = 4     # visible ring lines
+TUNNEL_SPEED      = 1.0   # base advance speed
+TUNNEL_KICK_ZOOM  = 1.0   # kick zoom intensity multiplier
+TUNNEL_CHROMA     = 1.0   # chromatic aberration strength multiplier
+
 BG_PULSE_INTENSITY = 0.5   # BG zoom depth on kick (0-1)
 FLASH_INTENSITY    = 0.5   # white flash opacity on kick (0-1)
 
