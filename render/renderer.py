@@ -8,6 +8,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
+    TUNNEL_KICK_SENSITIVITY,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 from render.modes import HaloSineMode
@@ -143,6 +144,7 @@ class Renderer:
                      tunnel_speed: float = TUNNEL_SPEED,
                      tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM,
                      tunnel_chroma: float = TUNNEL_CHROMA,
+                     tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                      pal_mode: int = 0,
                      bg_pulse: bool = False,
                      bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -230,7 +232,7 @@ class Renderer:
         bass_v = float(np.mean(bar_sl[:n_bass]))
         mid_v  = float(np.mean(bar_sl[n_bass:n_mid]))
         high_v = float(np.mean(bar_sl[n_mid:]) if n_mid < n_used else 0.0)
-        kick_n = float(np.clip((bass_v - self._prev_bass * 1.3) * 4.0, 0.0, 1.0))
+        kick_n = float(np.clip((bass_v - self._prev_bass * 1.3) * 4.0 * tunnel_kick_sensitivity, 0.0, 1.0))
         self._prev_bass  = bass_v
         self._kick_accum = max(kick_n, self._kick_accum * 0.88)
         self.prog["u_bass"].value          = bass_v

@@ -11,6 +11,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
+    TUNNEL_KICK_SENSITIVITY,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -42,6 +43,7 @@ class PreviewWidget(QOpenGLWidget):
         self._tunnel_speed: float = TUNNEL_SPEED
         self._tunnel_kick_zoom: float = TUNNEL_KICK_ZOOM
         self._tunnel_chroma: float = TUNNEL_CHROMA
+        self._tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY
         self._pal_mode: int = 0
         self._bg_pulse: bool = False
         self._bg_pulse_intensity: float = BG_PULSE_INTENSITY
@@ -99,6 +101,7 @@ class PreviewWidget(QOpenGLWidget):
             tunnel_speed=self._tunnel_speed,
             tunnel_kick_zoom=self._tunnel_kick_zoom,
             tunnel_chroma=self._tunnel_chroma,
+            tunnel_kick_sensitivity=self._tunnel_kick_sensitivity,
             pal_mode=self._pal_mode,
             bg_pulse=self._bg_pulse,
             bg_pulse_intensity=self._bg_pulse_intensity,
@@ -127,6 +130,7 @@ class PreviewWidget(QOpenGLWidget):
                    tunnel_speed: float = None,
                    tunnel_kick_zoom: float = None,
                    tunnel_chroma: float = None,
+                   tunnel_kick_sensitivity: float = None,
                    pal_mode: int = None,
                    bg_pulse: bool = None,
                    bg_pulse_intensity: float = None,
@@ -170,6 +174,8 @@ class PreviewWidget(QOpenGLWidget):
             self._tunnel_kick_zoom = tunnel_kick_zoom
         if tunnel_chroma is not None:
             self._tunnel_chroma = tunnel_chroma
+        if tunnel_kick_sensitivity is not None:
+            self._tunnel_kick_sensitivity = tunnel_kick_sensitivity
         if pal_mode is not None:
             self._pal_mode = pal_mode
         if bg_pulse is not None:
