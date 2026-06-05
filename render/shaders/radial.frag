@@ -436,6 +436,17 @@ void main() {
 
         color *= 0.92 + 0.08 * sin(v_uv.y * 900.0 * PI);
 
+        // Center image at tunnel vanishing point
+        if (u_has_center == 1) {
+            float cr   = u_halo_r_base * (1.0 + 0.08 * u_pulse * u_pulse_intensity);
+            vec2  uctr = uv / cr * 0.5 + 0.5;
+            float mask = smoothstep(cr, cr * 0.80, length(uv));
+            if (uctr.x >= 0.0 && uctr.x <= 1.0 && uctr.y >= 0.0 && uctr.y <= 1.0) {
+                vec4 s = texture(u_center_texture, uctr);
+                color  = mix(color, s.rgb, s.a * mask);
+            }
+        }
+
     // ── Halo Sine — background only; spline, ring, and center image drawn by PIL ──
     } else if (u_viz_type == 6) {
         // Ring, glow, and center image are composited in Python so they appear
