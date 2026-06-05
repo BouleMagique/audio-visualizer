@@ -11,7 +11,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
-    TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED,
+    TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -46,6 +46,7 @@ class PreviewWidget(QOpenGLWidget):
         self._tunnel_chroma: float = TUNNEL_CHROMA
         self._tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY
         self._tunnel_bass_speed: float = TUNNEL_BASS_SPEED
+        self._tunnel_kick_mode: int = TUNNEL_KICK_MODE
         self._pal_mode: int = 0
         self._bg_pulse: bool = False
         self._bg_pulse_intensity: float = BG_PULSE_INTENSITY
@@ -69,13 +70,17 @@ class PreviewWidget(QOpenGLWidget):
     def resizeGL(self, w: int, h: int):
         if not hasattr(self, "_ctx") or self._ctx is None:
             return
-        prev_bass   = self._renderer._prev_bass   if self._renderer else 0.0
-        kick_accum  = self._renderer._kick_accum  if self._renderer else 0.0
+        prev_bass    = self._renderer._prev_bass    if self._renderer else 0.0
+        kick_accum   = self._renderer._kick_accum   if self._renderer else 0.0
+        kick_buf     = self._renderer._kick_bass_buf if self._renderer else None
+        kick_cd      = self._renderer._kick_cooldown if self._renderer else 0
         if self._renderer:
             self._renderer.release()
         self._renderer = Renderer(w, h, ctx=self._ctx)
-        self._renderer._prev_bass  = prev_bass
-        self._renderer._kick_accum = kick_accum
+        self._renderer._prev_bass    = prev_bass
+        self._renderer._kick_accum   = kick_accum
+        self._renderer._kick_bass_buf = kick_buf
+        self._renderer._kick_cooldown = kick_cd
         if self._bg_image_path:
             self._renderer.load_background(self._bg_image_path)
         if self._center_image_path:
@@ -110,6 +115,7 @@ class PreviewWidget(QOpenGLWidget):
             tunnel_chroma=self._tunnel_chroma,
             tunnel_kick_sensitivity=self._tunnel_kick_sensitivity,
             tunnel_bass_speed=self._tunnel_bass_speed,
+            tunnel_kick_mode=self._tunnel_kick_mode,
             pal_mode=self._pal_mode,
             bg_pulse=self._bg_pulse,
             bg_pulse_intensity=self._bg_pulse_intensity,
@@ -141,6 +147,7 @@ class PreviewWidget(QOpenGLWidget):
                    tunnel_chroma: float = None,
                    tunnel_kick_sensitivity: float = None,
                    tunnel_bass_speed: float = None,
+                   tunnel_kick_mode: int = None,
                    pal_mode: int = None,
                    bg_pulse: bool = None,
                    bg_pulse_intensity: float = None,
@@ -190,6 +197,8 @@ class PreviewWidget(QOpenGLWidget):
             self._tunnel_kick_sensitivity = tunnel_kick_sensitivity
         if tunnel_bass_speed is not None:
             self._tunnel_bass_speed = tunnel_bass_speed
+        if tunnel_kick_mode is not None:
+            self._tunnel_kick_mode = tunnel_kick_mode
         if pal_mode is not None:
             self._pal_mode = pal_mode
         if bg_pulse is not None:

@@ -23,7 +23,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
-    TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED,
+    TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -60,6 +60,7 @@ class ExportWorker(QObject):
                  tunnel_chroma: float = TUNNEL_CHROMA,
                  tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                  tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
+                 tunnel_kick_mode: int = TUNNEL_KICK_MODE,
                  pal_mode: int = 0,
                  bg_pulse: bool = False, bg_pulse_intensity: float = 0.5,
                  flash: bool = False, flash_intensity: float = 0.5):
@@ -92,6 +93,7 @@ class ExportWorker(QObject):
             tunnel_chroma=tunnel_chroma,
             tunnel_kick_sensitivity=tunnel_kick_sensitivity,
             tunnel_bass_speed=tunnel_bass_speed,
+            tunnel_kick_mode=tunnel_kick_mode,
             pal_mode=pal_mode,
             bg_pulse=bg_pulse,
             bg_pulse_intensity=bg_pulse_intensity,
@@ -404,6 +406,12 @@ class MainWindow(QMainWindow):
         self._combo_tunnel_sides.currentIndexChanged.connect(self._on_params_changed)
         tg_f.addRow("Côtés", self._combo_tunnel_sides)
 
+        self._combo_tunnel_kick_mode = QComboBox()
+        self._combo_tunnel_kick_mode.addItems(["Delta", "Seuil adaptatif"])
+        self._combo_tunnel_kick_mode.setCurrentIndex(TUNNEL_KICK_MODE)
+        self._combo_tunnel_kick_mode.currentIndexChanged.connect(self._on_params_changed)
+        tg_f.addRow("Détection", self._combo_tunnel_kick_mode)
+
         self._row_tunnel_rings = self._make_slider_row(
             tg_f, "Anneaux", 1, 16, TUNNEL_RINGS, self._on_params_changed)
 
@@ -675,6 +683,7 @@ class MainWindow(QMainWindow):
             tunnel_chroma=self._sl(self._row_tunnel_chroma).value() / 100,
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
             tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
+            tunnel_kick_mode=self._combo_tunnel_kick_mode.currentIndex(),
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
@@ -766,6 +775,7 @@ class MainWindow(QMainWindow):
             tunnel_chroma=self._sl(self._row_tunnel_chroma).value() / 100,
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
             tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
+            tunnel_kick_mode=self._combo_tunnel_kick_mode.currentIndex(),
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
