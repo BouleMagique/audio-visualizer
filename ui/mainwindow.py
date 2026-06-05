@@ -180,8 +180,9 @@ class MainWindow(QMainWindow):
         sb = QSpinBox()
         sb.setRange(lo, hi)
         sb.setValue(val)
-        sb.setMinimumWidth(72)
-        sb.setFixedWidth(72)
+        sb.setButtonSymbols(QSpinBox.NoButtons)
+        sb.setMinimumWidth(90)
+        sb.setFixedWidth(90)
 
         # connexion bidirectionnelle sans boucle infinie (Qt vérifie si la valeur change)
         sl.valueChanged.connect(sb.setValue)
