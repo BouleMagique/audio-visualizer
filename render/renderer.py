@@ -13,7 +13,7 @@ from config.defaults import (
     TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
-from render.modes import HaloSineMode
+from render.modes import HaloSineMode, FlatSineMode
 
 
 SHADER_DIR = Path(__file__).parent / "shaders"
@@ -54,6 +54,7 @@ class Renderer:
             self._owns_ctx = False
 
         self._halo_sine = HaloSineMode()
+        self._flat_sine = FlatSineMode()
         self._build_program()
         self._build_quad()
         self.fbo = self.ctx.framebuffer(
@@ -342,6 +343,25 @@ class Renderer:
             result_tb = self._draw_ring_glow(
                 result_tb, r_px, palette,
                 pulse=pulse, pulse_intensity=pulse_intensity,
+            )
+            result_bt = np.ascontiguousarray(result_tb[::-1])
+            self.fbo.color_attachments[0].write(result_bt.tobytes())
+
+        # Mode 9: horizontal flat sine — PIL waveform overlay
+        if viz_type == 9:
+            raw       = self.fbo.read(components=3)
+            pixels_bt = np.frombuffer(raw, dtype=np.uint8).reshape(self.height, self.width, 3)
+            pixels_tb = np.ascontiguousarray(pixels_bt[::-1])
+            result_tb = self._flat_sine.draw_overlay(
+                pixels_tb, bars=bars,
+                amplitude_max=halo_amplitude,
+                n_points=halo_n_points,
+                glow_layers=halo_glow_layers,
+                smoothing_decay=halo_smoothing_decay,
+                sensitivity=sensitivity,
+                palette=palette,
+                fill_opacity=halo_fill_opacity,
+                pal_mode=pal_mode,
             )
             result_bt = np.ascontiguousarray(result_tb[::-1])
             self.fbo.color_attachments[0].write(result_bt.tobytes())

@@ -34,7 +34,7 @@ _ROTATION_MODES   = {0, 4, 5, 6, 7}
 _BAR_MODES        = {0, 1, 2, 4, 5, 7}
 _HEIGHT_MODES     = {0, 1, 2, 4, 5, 7}
 _HALO_MODES       = {4, 5, 6, 7, 8}
-_HALO_SINE_MODES  = {6}
+_HALO_SINE_MODES  = {6, 9}
 _TUNNEL_MODES     = {8}
 _MIRROR_MODES     = {0, 4}
 
@@ -589,6 +589,11 @@ class MainWindow(QMainWindow):
         self._set_row_visible(self._row_rotation,  has_rotation)
         self._center_group.setVisible(is_halo)
         self._halo_sine_group.setVisible(is_halo_sine)
+        # Sliders only relevant for mode 6 (not flat sine mode 9)
+        is_halo_circle = viz_type == 6
+        self._set_row_visible(self._row_hs_r_base, is_halo_circle)
+        self._set_row_visible(self._row_hs_gap,    is_halo_circle)
+        self._set_row_visible(self._row_hs_pixel,  is_halo_circle)
         self._tunnel_group.setVisible(is_tunnel)
         self._chk_mirror.setVisible(has_mirror)
         pal_name = self._combo_palette.currentText()

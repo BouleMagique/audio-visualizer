@@ -2,6 +2,32 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 
+def _catmull_rom_open(points: list, subdivisions: int = 6) -> list:
+    """Open Catmull-Rom spline — phantom clamping at endpoints."""
+    n = len(points)
+    if n < 2:
+        return list(points)
+    result = []
+    for i in range(n - 1):
+        p0 = points[max(0, i - 1)]
+        p1 = points[i]
+        p2 = points[i + 1]
+        p3 = points[min(n - 1, i + 2)]
+        for k in range(subdivisions):
+            t = k / subdivisions
+            t2 = t * t
+            t3 = t2 * t
+            x = 0.5 * (2*p1[0] + (-p0[0]+p2[0])*t
+                       + (2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2
+                       + (-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3)
+            y = 0.5 * (2*p1[1] + (-p0[1]+p2[1])*t
+                       + (2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2
+                       + (-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3)
+            result.append((x, y))
+    result.append(points[-1])
+    return result
+
+
 def _catmull_rom_closed(points: list, subdivisions: int = 6) -> list:
     """Closed Catmull-Rom spline — returns list of (float, float) tuples."""
     n = len(points)
@@ -194,3 +220,110 @@ class HaloSineMode:
         base_img   = Image.fromarray(frame_rgb, "RGB").convert("RGBA")
         composited = Image.alpha_composite(base_img, overlay)
         return np.array(composited.convert("RGB"))
+
+
+class FlatSineMode:
+    """PIL-based horizontal Catmull-Rom waveform, mirrored top/bottom."""
+
+    _N_GAIN_FRAMES = 180
+
+    def __init__(self):
+        self._smoothed: np.ndarray | None = None
+        self._gain_buf = np.zeros(self._N_GAIN_FRAMES, dtype=np.float32)
+        self._gain_ptr = 0
+
+    def draw_overlay(
+        self,
+        frame_rgb: np.ndarray,
+        bars: np.ndarray,
+        amplitude_max: float,
+        n_points: int,
+        glow_layers: int,
+        smoothing_decay: float,
+        sensitivity: float,
+        palette: list,
+        fill_opacity: float = 0.0,
+        pal_mode: int = 0,
+    ) -> np.ndarray:
+        H, W = frame_rgb.shape[:2]
+        cy     = H / 2.0
+        amp_px = amplitude_max * H
+
+        n  = len(bars)
+        xs = np.linspace(0, n - 1, n_points)
+        energy = np.clip(
+            np.interp(xs, np.arange(n), bars) * sensitivity, 0.0, 1.0
+        ).astype(np.float32)
+
+        # Auto-gain (95th percentile over rolling window)
+        frame_peak = float(energy.max())
+        self._gain_buf[self._gain_ptr] = frame_peak
+        self._gain_ptr = (self._gain_ptr + 1) % self._N_GAIN_FRAMES
+        active = self._gain_buf[self._gain_buf > 0]
+        p95 = float(np.percentile(active, 95)) if len(active) > 0 else 1.0
+        energy = energy / max(p95, 1e-6)
+
+        # Per-point smoothing
+        if self._smoothed is None or len(self._smoothed) != n_points:
+            self._smoothed = np.zeros(n_points, dtype=np.float32)
+        self._smoothed = np.maximum(energy, self._smoothed * smoothing_decay)
+        deform = self._smoothed * amp_px
+
+        x_pts = np.linspace(0.0, float(W - 1), n_points)
+        top_pts    = [(float(x_pts[i]), cy - deform[i]) for i in range(n_points)]
+        bottom_pts = [(float(x_pts[i]), cy + deform[i]) for i in range(n_points)]
+
+        top_curve    = _catmull_rom_open(top_pts)
+        bottom_curve = _catmull_rom_open(bottom_pts)
+
+        if not top_curve or not bottom_curve:
+            return frame_rgb
+
+        mean_t  = float(deform.mean()) / max(amp_px, 1e-6)
+        base_col = _pal_color(np.clip(mean_t, 0.0, 1.0), palette)
+
+        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+        # Fill between curves
+        if fill_opacity > 0.0:
+            fill_alpha = int(np.clip(fill_opacity, 0.0, 1.0) * 255)
+            draw = ImageDraw.Draw(overlay)
+            draw.polygon(top_curve + bottom_curve[::-1], fill=(*base_col, fill_alpha))
+            del draw
+
+        # Glow passes
+        n_segs   = n_points
+        seg_size = max(1, len(top_curve) // n_segs)
+
+        for pass_i in range(glow_layers, 0, -1):
+            frac      = 1.0 - (pass_i - 1) / max(glow_layers - 1, 1)
+            width     = max(1, pass_i * 3)
+            alpha     = int(40 + frac * 215)
+            white_mix = frac * 0.65
+
+            if pal_mode == 1:
+                # Fréquence: color each segment by horizontal position
+                for seg_i in range(n_segs):
+                    freq_t  = seg_i / max(n_segs - 1, 1)
+                    seg_col = _pal_color(freq_t, palette)
+                    r = min(255, int(seg_col[0] * (1.0 - white_mix) + 255 * white_mix))
+                    g = min(255, int(seg_col[1] * (1.0 - white_mix) + 255 * white_mix))
+                    b = min(255, int(seg_col[2] * (1.0 - white_mix) + 255 * white_mix))
+                    s = seg_i * seg_size
+                    e = min(s + seg_size + 2, len(top_curve))
+                    if e - s >= 2:
+                        draw = ImageDraw.Draw(overlay)
+                        draw.line(top_curve[s:e],    fill=(r, g, b, alpha), width=width)
+                        draw.line(bottom_curve[s:e], fill=(r, g, b, alpha), width=width)
+                        del draw
+            else:
+                r = min(255, int(base_col[0] * (1.0 - white_mix) + 255 * white_mix))
+                g = min(255, int(base_col[1] * (1.0 - white_mix) + 255 * white_mix))
+                b = min(255, int(base_col[2] * (1.0 - white_mix) + 255 * white_mix))
+                draw = ImageDraw.Draw(overlay)
+                draw.line(top_curve,    fill=(r, g, b, alpha), width=width)
+                draw.line(bottom_curve, fill=(r, g, b, alpha), width=width)
+                del draw
+
+        base_img   = Image.fromarray(frame_rgb, "RGB").convert("RGBA")
+        return np.array(Image.alpha_composite(base_img, overlay).convert("RGB"))

@@ -460,6 +460,9 @@ void main() {
             }
         }
 
+    // ── Sine Plat — background only; waveform drawn by PIL ──
+    } else if (u_viz_type == 9) {
+
     // ── Halo Sine — background only; spline, ring, and center image drawn by PIL ──
     } else if (u_viz_type == 6) {
         // Ring, glow, and center image are composited in Python so they appear
