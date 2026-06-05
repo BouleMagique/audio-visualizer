@@ -300,10 +300,13 @@ class Renderer:
         if pixel_size > 1:
             small_d = max(1, diam // pixel_size)
             resized = resized.resize((small_d, small_d), Image.NEAREST).resize((diam, diam), Image.NEAREST)
-        mask = Image.new("L", (diam, diam), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.ellipse([0, 0, diam - 1, diam - 1], fill=255)
+        # Anti-aliased circular mask via 4× supersampling
+        OVR = 4
+        mask_big = Image.new("L", (diam * OVR, diam * OVR), 0)
+        draw = ImageDraw.Draw(mask_big)
+        draw.ellipse([0, 0, diam * OVR - 1, diam * OVR - 1], fill=255)
         del draw
+        mask = mask_big.resize((diam, diam), Image.LANCZOS)
         resized.putalpha(mask)
         base = Image.fromarray(frame_tb, "RGB").convert("RGBA")
         base.paste(resized, (int(cx - r), int(cy - r)), resized)
@@ -317,37 +320,49 @@ class Renderer:
         from PIL import ImageDraw
         H, W = frame_tb.shape[:2]
         cx, cy = int(W / 2), int(H / 2)
-        r = int(r_px * (1.0 + 0.10 * pulse * pulse_intensity))
-        r = max(4, r)
+        r = max(4, int(r_px * (1.0 + 0.10 * pulse * pulse_intensity)))
 
         pal0 = tuple(int(c * 255) for c in palette[0][:3])
         pal1 = tuple(int(c * 255) for c in palette[1][:3])
 
-        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
+        # Draw the ring in a local patch at 2× scale for smooth edges
+        OVR      = 2
+        max_ext  = 7 * max(1, r // 35)
+        pad      = max_ext + 4
+        patch_r  = r + pad
+        ps       = patch_r * 2 * OVR          # patch side at 2×
+        pc       = patch_r * OVR              # centre in patch at 2×
+        r2       = r * OVR
+        rg2      = int(r * 1.5) * OVR
 
-        # Soft central glow (pal0, fills inside the circle)
-        rg = int(r * 1.5)
-        draw.ellipse([cx - rg, cy - rg, cx + rg, cy + rg], fill=(*pal0, 20))
-        draw.ellipse([cx - r,  cy - r,  cx + r,  cy + r],  fill=(*pal0, 12))
+        patch = Image.new("RGBA", (ps, ps), (0, 0, 0, 0))
+        draw  = ImageDraw.Draw(patch)
 
-        # Wide outer glow passes (pal0, additive-like)
+        # Soft central glow
+        draw.ellipse([pc - rg2, pc - rg2, pc + rg2, pc + rg2], fill=(*pal0, 20))
+        draw.ellipse([pc - r2,  pc - r2,  pc + r2,  pc + r2],  fill=(*pal0, 12))
+
+        # Wide outer glow passes
         for i in range(7, 0, -1):
-            extra = i * max(1, r // 35)
-            alpha = i * 5
+            extra2 = i * max(1, r // 35) * OVR
             draw.ellipse(
-                [cx - r - extra, cy - r - extra, cx + r + extra, cy + r + extra],
-                outline=(*pal0, alpha), width=extra + 1,
+                [pc - r2 - extra2, pc - r2 - extra2, pc + r2 + extra2, pc + r2 + extra2],
+                outline=(*pal0, i * 5), width=extra2 + 1,
             )
 
-        # Bright core ring (pal1)
-        rw = max(2, r // 20)
-        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(*pal1, 200), width=rw)
-        # White-hot center line
-        draw.ellipse([cx - r, cy - r, cx + r, cy + r],
-                     outline=(255, 255, 255, 85), width=max(1, rw // 2))
-
+        # Bright core ring
+        rw2 = max(2, r // 20) * OVR
+        draw.ellipse([pc - r2, pc - r2, pc + r2, pc + r2], outline=(*pal1, 200), width=rw2)
+        draw.ellipse([pc - r2, pc - r2, pc + r2, pc + r2],
+                     outline=(255, 255, 255, 85), width=max(1, rw2 // 2))
         del draw
+
+        # Downsample patch to 1× with LANCZOS (anti-aliased edges)
+        patch_1x = patch.resize((patch_r * 2, patch_r * 2), Image.LANCZOS)
+
+        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        overlay.paste(patch_1x, (cx - patch_r, cy - patch_r), patch_1x)
+
         base = Image.fromarray(frame_tb, "RGB").convert("RGBA")
         return np.array(Image.alpha_composite(base, overlay).convert("RGB"))
 
