@@ -47,6 +47,7 @@ class PreviewWidget(QOpenGLWidget):
         self._tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY
         self._tunnel_bass_speed: float = TUNNEL_BASS_SPEED
         self._tunnel_kick_mode: int = TUNNEL_KICK_MODE
+        self._mirror: bool = False
         self._pal_mode: int = 0
         self._bg_pulse: bool = False
         self._bg_pulse_intensity: float = BG_PULSE_INTENSITY
@@ -116,6 +117,7 @@ class PreviewWidget(QOpenGLWidget):
             tunnel_kick_sensitivity=self._tunnel_kick_sensitivity,
             tunnel_bass_speed=self._tunnel_bass_speed,
             tunnel_kick_mode=self._tunnel_kick_mode,
+            mirror=self._mirror,
             pal_mode=self._pal_mode,
             bg_pulse=self._bg_pulse,
             bg_pulse_intensity=self._bg_pulse_intensity,
@@ -148,6 +150,7 @@ class PreviewWidget(QOpenGLWidget):
                    tunnel_kick_sensitivity: float = None,
                    tunnel_bass_speed: float = None,
                    tunnel_kick_mode: int = None,
+                   mirror: bool = None,
                    pal_mode: int = None,
                    bg_pulse: bool = None,
                    bg_pulse_intensity: float = None,
@@ -199,6 +202,8 @@ class PreviewWidget(QOpenGLWidget):
             self._tunnel_bass_speed = tunnel_bass_speed
         if tunnel_kick_mode is not None:
             self._tunnel_kick_mode = tunnel_kick_mode
+        if mirror is not None:
+            self._mirror = mirror
         if pal_mode is not None:
             self._pal_mode = pal_mode
         if bg_pulse is not None:

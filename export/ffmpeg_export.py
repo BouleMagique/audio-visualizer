@@ -49,6 +49,7 @@ class FFmpegExporter:
                  tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                  tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                  tunnel_kick_mode: int = TUNNEL_KICK_MODE,
+                 mirror: bool = False,
                  pal_mode: int = 0,
                  bg_pulse: bool = False,
                  bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -84,6 +85,7 @@ class FFmpegExporter:
         self.tunnel_kick_sensitivity = tunnel_kick_sensitivity
         self.tunnel_bass_speed = tunnel_bass_speed
         self.tunnel_kick_mode = tunnel_kick_mode
+        self.mirror = mirror
         self.pal_mode = pal_mode
         self.bg_pulse = bg_pulse
         self.bg_pulse_intensity = bg_pulse_intensity
@@ -170,6 +172,7 @@ class FFmpegExporter:
                     tunnel_kick_sensitivity=self.tunnel_kick_sensitivity,
                     tunnel_bass_speed=self.tunnel_bass_speed,
                     tunnel_kick_mode=self.tunnel_kick_mode,
+                    mirror=self.mirror,
                     pal_mode=self.pal_mode,
                     bg_pulse=self.bg_pulse,
                     bg_pulse_intensity=self.bg_pulse_intensity,

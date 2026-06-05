@@ -150,6 +150,7 @@ class Renderer:
                      tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                      tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                      tunnel_kick_mode: int = TUNNEL_KICK_MODE,
+                     mirror: bool = False,
                      pal_mode: int = 0,
                      bg_pulse: bool = False,
                      bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -195,6 +196,7 @@ class Renderer:
         self.prog["u_sensitivity"].value = float(sensitivity)
         self.prog["u_viz_type"].value    = int(viz_type)
         self.prog["u_rotation"].value    = float(rotation)
+        self.prog["u_mirror"].value              = int(mirror)
         self.prog["u_pal_mode"].value            = int(pal_mode)
         self.prog["u_halo_r_base"].value         = float(halo_r_base)
         self.prog["u_bg_pulse_enabled"].value    = int(bg_pulse)

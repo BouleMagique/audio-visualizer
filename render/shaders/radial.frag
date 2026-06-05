@@ -35,6 +35,7 @@ uniform int   u_bg_pulse_enabled;  // 1 = zoom BG on bass hits
 uniform float u_bg_pulse_intensity;
 uniform int   u_flash_enabled;     // 1 = white flash on bass hits
 uniform float u_flash_intensity;
+uniform int   u_mirror;           // 1 = each half covers the full spectrum
 uniform float u_bass;             // mean energy, first 30 % of bars
 uniform float u_mid;              // mean energy, 30–70 %
 uniform float u_high;             // mean energy, 70–100 %
@@ -143,7 +144,8 @@ void main() {
         vec2 uv = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
         float dist  = length(uv);
         float angle = atan(uv.y, uv.x) - u_rotation;
-        float t_ang = fract(angle / (2.0 * PI) + 0.5);
+        float t_raw = fract(angle / (2.0 * PI) + 0.5);
+        float t_ang = (u_mirror == 1) ? (1.0 - abs(t_raw * 2.0 - 1.0)) : t_raw;
 
         float pulse_r = u_circle_radius * (1.0 + 0.12 * u_pulse * u_pulse_intensity);
 
@@ -153,11 +155,19 @@ void main() {
         int   bar_idx = int(t_ang * float(u_num_bars)) % u_num_bars;
         float bar_val = clamp(u_bars[bar_idx] * u_sensitivity, 0.0, 1.0);
         float bar_len = bar_val * 0.55 * u_max_bar_height;
-        float freq_t0 = float(bar_idx) / float(max(u_num_bars - 1, 1));
+        float freq_t0 = t_ang;
 
-        float seg_w   = 2.0 * PI / float(u_num_bars);
-        float half_w  = seg_w * u_bar_width * 0.5;
-        float bar_ang = (float(bar_idx) + 0.5) / float(u_num_bars) * 2.0 * PI - PI;
+        float seg_w  = (u_mirror == 1) ? (PI / float(u_num_bars)) : (2.0 * PI / float(u_num_bars));
+        float half_w = seg_w * u_bar_width * 0.5;
+        float bar_ang;
+        if (u_mirror == 1) {
+            float t_bar_raw = (t_raw < 0.5)
+                ? (float(bar_idx) + 0.5) / float(u_num_bars) * 0.5
+                : 1.0 - (float(bar_idx) + 0.5) / float(u_num_bars) * 0.5;
+            bar_ang = (t_bar_raw - 0.5) * 2.0 * PI;
+        } else {
+            bar_ang = (float(bar_idx) + 0.5) / float(u_num_bars) * 2.0 * PI - PI;
+        }
         float ang_diff = abs(mod(angle - bar_ang + PI, 2.0 * PI) - PI);
 
         if (ang_diff < half_w && dist >= pulse_r) {
@@ -245,8 +255,9 @@ void main() {
     } else if (u_viz_type == 4) {
         vec2  uv_c = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
         float dist  = length(uv_c);
-        float angle = atan(uv_c.y, uv_c.x) - u_rotation;
-        float theta = fract(angle / (2.0 * PI) + 0.5);   // [0, 1]
+        float angle     = atan(uv_c.y, uv_c.x) - u_rotation;
+        float theta_raw = fract(angle / (2.0 * PI) + 0.5);
+        float theta     = (u_mirror == 1) ? (1.0 - abs(theta_raw * 2.0 - 1.0)) : theta_raw;
 
         // Catmull-Rom interpolated bar value
         float bar_f = theta * float(u_num_bars);

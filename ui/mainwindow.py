@@ -34,6 +34,7 @@ _HEIGHT_MODES     = {0, 1, 2, 4, 5, 7}
 _HALO_MODES       = {4, 5, 6, 7, 8}
 _HALO_SINE_MODES  = {6}
 _TUNNEL_MODES     = {8}
+_MIRROR_MODES     = {0, 4}
 
 _AMP_LABELS  = ["Silence", "Faible", "Moyen", "Fort", "Saturation"]
 _FREQ_LABELS = ["Grave", "Basse", "Médium", "Présence", "Aigu"]
@@ -61,6 +62,7 @@ class ExportWorker(QObject):
                  tunnel_kick_sensitivity: float = TUNNEL_KICK_SENSITIVITY,
                  tunnel_bass_speed: float = TUNNEL_BASS_SPEED,
                  tunnel_kick_mode: int = TUNNEL_KICK_MODE,
+                 mirror: bool = False,
                  pal_mode: int = 0,
                  bg_pulse: bool = False, bg_pulse_intensity: float = 0.5,
                  flash: bool = False, flash_intensity: float = 0.5):
@@ -94,6 +96,7 @@ class ExportWorker(QObject):
             tunnel_kick_sensitivity=tunnel_kick_sensitivity,
             tunnel_bass_speed=tunnel_bass_speed,
             tunnel_kick_mode=tunnel_kick_mode,
+            mirror=mirror,
             pal_mode=pal_mode,
             bg_pulse=bg_pulse,
             bg_pulse_intensity=bg_pulse_intensity,
@@ -344,6 +347,10 @@ class MainWindow(QMainWindow):
         self._row_rotation = self._make_slider_row(
             pf, "Rotation (°)", 0, 360, 0, self._on_params_changed)
 
+        self._chk_mirror = QCheckBox("Miroir (½ cercle = spectre entier)")
+        self._chk_mirror.stateChanged.connect(self._on_params_changed)
+        pf.addRow("", self._chk_mirror)
+
         pl.addWidget(pg)
 
         # ── Répartition fréquentielle ──
@@ -550,6 +557,7 @@ class MainWindow(QMainWindow):
         is_halo      = viz_type in _HALO_MODES
         is_halo_sine = viz_type in _HALO_SINE_MODES
         is_tunnel    = viz_type in _TUNNEL_MODES
+        has_mirror   = viz_type in _MIRROR_MODES
 
         self._set_row_visible(self._row_bars,      is_bar)
         self._set_row_visible(self._row_height,    has_height)
@@ -558,6 +566,7 @@ class MainWindow(QMainWindow):
         self._center_group.setVisible(is_halo)
         self._halo_sine_group.setVisible(is_halo_sine)
         self._tunnel_group.setVisible(is_tunnel)
+        self._chk_mirror.setVisible(has_mirror)
         pal_name = self._combo_palette.currentText()
         self._custom_amp_group.setVisible(pal_name == "Perso. Amplitude")
         self._custom_freq_group.setVisible(pal_name == "Perso. Fréquence")
@@ -720,6 +729,7 @@ class MainWindow(QMainWindow):
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
             tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
             tunnel_kick_mode=self._combo_tunnel_kick_mode.currentIndex(),
+            mirror=self._chk_mirror.isChecked(),
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
@@ -859,6 +869,7 @@ class MainWindow(QMainWindow):
             tunnel_kick_sensitivity=self._sl(self._row_tunnel_kick_sens).value() / 100,
             tunnel_bass_speed=self._sl(self._row_tunnel_bass_speed).value() / 100,
             tunnel_kick_mode=self._combo_tunnel_kick_mode.currentIndex(),
+            mirror=self._chk_mirror.isChecked(),
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
