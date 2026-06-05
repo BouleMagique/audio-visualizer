@@ -9,7 +9,7 @@ from config.defaults import (
     NUM_BARS, PALETTES, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    HALO_SINE_SPLINE_GAP,
+    HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
@@ -38,6 +38,7 @@ class PreviewWidget(QOpenGLWidget):
         self._halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY
         self._halo_fill_opacity: float = HALO_SINE_FILL_OPACITY
         self._halo_spline_gap: float = HALO_SINE_SPLINE_GAP
+        self._halo_pixel_size: int = HALO_SINE_PIXEL_SIZE
         self._tunnel_sides: int = TUNNEL_SIDES
         self._tunnel_rings: int = TUNNEL_RINGS
         self._tunnel_speed: float = TUNNEL_SPEED
@@ -96,6 +97,7 @@ class PreviewWidget(QOpenGLWidget):
             halo_smoothing_decay=self._halo_smoothing_decay,
             halo_fill_opacity=self._halo_fill_opacity,
             halo_spline_gap=self._halo_spline_gap,
+            halo_pixel_size=self._halo_pixel_size,
             tunnel_sides=self._tunnel_sides,
             tunnel_rings=self._tunnel_rings,
             tunnel_speed=self._tunnel_speed,
@@ -125,6 +127,7 @@ class PreviewWidget(QOpenGLWidget):
                    halo_smoothing_decay: float = None,
                    halo_fill_opacity: float = None,
                    halo_spline_gap: float = None,
+                   halo_pixel_size: int = None,
                    tunnel_sides: int = None,
                    tunnel_rings: int = None,
                    tunnel_speed: float = None,
@@ -164,6 +167,8 @@ class PreviewWidget(QOpenGLWidget):
             self._halo_fill_opacity = halo_fill_opacity
         if halo_spline_gap is not None:
             self._halo_spline_gap = halo_spline_gap
+        if halo_pixel_size is not None:
+            self._halo_pixel_size = halo_pixel_size
         if tunnel_sides is not None:
             self._tunnel_sides = tunnel_sides
         if tunnel_rings is not None:

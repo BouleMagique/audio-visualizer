@@ -6,7 +6,7 @@ from config.defaults import (
     CIRCLE_RADIUS_RATIO, BAR_WIDTH, PALETTES, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    HALO_SINE_SPLINE_GAP,
+    HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
@@ -139,6 +139,7 @@ class Renderer:
                      halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY,
                      halo_fill_opacity: float = HALO_SINE_FILL_OPACITY,
                      halo_spline_gap: float = HALO_SINE_SPLINE_GAP,
+                     halo_pixel_size: int = HALO_SINE_PIXEL_SIZE,
                      tunnel_sides: int = TUNNEL_SIDES,
                      tunnel_rings: int = TUNNEL_RINGS,
                      tunnel_speed: float = TUNNEL_SPEED,
@@ -273,6 +274,7 @@ class Renderer:
                 result_tb = self._composite_center_circle(
                     result_tb, self._center_pil, r_px,
                     pulse=pulse, pulse_intensity=pulse_intensity,
+                    pixel_size=halo_pixel_size,
                 )
             result_tb = self._draw_ring_glow(
                 result_tb, r_px, palette,
@@ -285,13 +287,17 @@ class Renderer:
                                   center_pil: "Image.Image",
                                   r_px: float,
                                   pulse: float = 0.0,
-                                  pulse_intensity: float = 1.0) -> np.ndarray:
+                                  pulse_intensity: float = 1.0,
+                                  pixel_size: int = 1) -> np.ndarray:
         from PIL import ImageDraw
         H, W = frame_tb.shape[:2]
         cx, cy = W / 2.0, H / 2.0
         r = max(1, int(r_px * (1.0 + 0.10 * pulse * pulse_intensity)))
         diam = r * 2
         resized = center_pil.resize((diam, diam), Image.LANCZOS)
+        if pixel_size > 1:
+            small_d = max(1, diam // pixel_size)
+            resized = resized.resize((small_d, small_d), Image.NEAREST).resize((diam, diam), Image.NEAREST)
         mask = Image.new("L", (diam, diam), 0)
         draw = ImageDraw.Draw(mask)
         draw.ellipse([0, 0, diam - 1, diam - 1], fill=255)

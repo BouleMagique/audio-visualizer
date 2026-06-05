@@ -75,6 +75,7 @@ HALO_SINE_WAVE_SPEED      = 1.5    # traveling wave speed in rad/s
 HALO_SINE_SMOOTHING_DECAY = 0.80   # per-point EMA decay (fast attack, slow release)
 HALO_SINE_FILL_OPACITY    = 0.0    # interior fill opacity (0 = no fill)
 HALO_SINE_SPLINE_GAP      = 1.4    # spline base radius as multiple of center circle radius
+HALO_SINE_PIXEL_SIZE      = 1      # center image pixelation block size (1 = off)
 
 # Tunnel Arcade mode defaults
 TUNNEL_SIDES      = 8     # polygon sides (4 / 6 / 8 / 12)

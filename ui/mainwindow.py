@@ -21,7 +21,7 @@ from config.defaults import (
     FREQ_BASS_SPLIT, FREQ_BASS_SPLIT_HZ, CQT_BINS_PER_OCTAVE,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    HALO_SINE_SPLINE_GAP,
+    HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
@@ -52,6 +52,7 @@ class ExportWorker(QObject):
                  use_cqt, bins_per_octave,
                  halo_r_base, halo_amplitude, halo_n_points, halo_glow_layers,
                  halo_smoothing_decay, halo_fill_opacity, halo_spline_gap,
+                 halo_pixel_size: int = HALO_SINE_PIXEL_SIZE,
                  tunnel_sides: int = TUNNEL_SIDES,
                  tunnel_rings: int = TUNNEL_RINGS,
                  tunnel_speed: float = TUNNEL_SPEED,
@@ -82,6 +83,7 @@ class ExportWorker(QObject):
             halo_smoothing_decay=halo_smoothing_decay,
             halo_fill_opacity=halo_fill_opacity,
             halo_spline_gap=halo_spline_gap,
+            halo_pixel_size=halo_pixel_size,
             tunnel_sides=tunnel_sides,
             tunnel_rings=tunnel_rings,
             tunnel_speed=tunnel_speed,
@@ -382,6 +384,10 @@ class MainWindow(QMainWindow):
             hsf, "Distance sine (×0.01)", 10, 250, int(HALO_SINE_SPLINE_GAP * 100),
             self._on_params_changed)
 
+        self._row_hs_pixel = self._make_slider_row(
+            hsf, "Pixelisation", 1, 64, HALO_SINE_PIXEL_SIZE,
+            self._on_params_changed)
+
         pl.addWidget(self._halo_sine_group)
 
         # ── Tunnel Arcade ──
@@ -654,6 +660,7 @@ class MainWindow(QMainWindow):
             halo_smoothing_decay=self._sl(self._row_hs_decay).value() / 100,
             halo_fill_opacity=self._sl(self._row_hs_fill).value() / 100,
             halo_spline_gap=self._sl(self._row_hs_gap).value() / 100,
+            halo_pixel_size=self._sl(self._row_hs_pixel).value(),
             tunnel_sides=int(self._combo_tunnel_sides.currentText()),
             tunnel_rings=self._sl(self._row_tunnel_rings).value(),
             tunnel_speed=self._sl(self._row_tunnel_speed).value() / 100,
@@ -743,6 +750,7 @@ class MainWindow(QMainWindow):
             halo_smoothing_decay=self._sl(self._row_hs_decay).value() / 100,
             halo_fill_opacity=self._sl(self._row_hs_fill).value() / 100,
             halo_spline_gap=self._sl(self._row_hs_gap).value() / 100,
+            halo_pixel_size=self._sl(self._row_hs_pixel).value(),
             tunnel_sides=int(self._combo_tunnel_sides.currentText()),
             tunnel_rings=self._sl(self._row_tunnel_rings).value(),
             tunnel_speed=self._sl(self._row_tunnel_speed).value() / 100,

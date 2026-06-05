@@ -11,7 +11,7 @@ from config.defaults import (
     RESOLUTIONS, FPS, FFT_SIZE, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    HALO_SINE_SPLINE_GAP,
+    HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY,
     CQT_BINS_PER_OCTAVE, BG_PULSE_INTENSITY, FLASH_INTENSITY,
@@ -40,6 +40,7 @@ class FFmpegExporter:
                  halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY,
                  halo_fill_opacity: float = HALO_SINE_FILL_OPACITY,
                  halo_spline_gap: float = HALO_SINE_SPLINE_GAP,
+                 halo_pixel_size: int = HALO_SINE_PIXEL_SIZE,
                  tunnel_sides: int = TUNNEL_SIDES,
                  tunnel_rings: int = TUNNEL_RINGS,
                  tunnel_speed: float = TUNNEL_SPEED,
@@ -72,6 +73,7 @@ class FFmpegExporter:
         self.halo_smoothing_decay = halo_smoothing_decay
         self.halo_fill_opacity = halo_fill_opacity
         self.halo_spline_gap = halo_spline_gap
+        self.halo_pixel_size = halo_pixel_size
         self.tunnel_sides = tunnel_sides
         self.tunnel_rings = tunnel_rings
         self.tunnel_speed = tunnel_speed
@@ -155,6 +157,7 @@ class FFmpegExporter:
                     halo_smoothing_decay=self.halo_smoothing_decay,
                     halo_fill_opacity=self.halo_fill_opacity,
                     halo_spline_gap=self.halo_spline_gap,
+                    halo_pixel_size=self.halo_pixel_size,
                     tunnel_sides=self.tunnel_sides,
                     tunnel_rings=self.tunnel_rings,
                     tunnel_speed=self.tunnel_speed,
