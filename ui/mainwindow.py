@@ -116,14 +116,18 @@ class ExportWorker(QObject):
 
 
 class AudioPlaybackThread(QThread):
-    frame_ready = Signal(object, float)
+    frame_ready      = Signal(object, float)
+    position_changed = Signal(int, int)   # current_frame, total_frames
 
-    def __init__(self, audio: AudioFile, fft: FFTProcessor, fps: int):
+    def __init__(self, audio: AudioFile, fft: FFTProcessor, fps: int,
+                 start_frame: int = 0, volume: float = 1.0):
         super().__init__()
-        self._audio = audio
-        self._fft   = fft
-        self._fps   = fps
-        self._running = False
+        self._audio       = audio
+        self._fft         = fft
+        self._fps         = fps
+        self._running     = False
+        self._start_frame = start_frame
+        self._volume      = volume
 
     def update_fft(self, fft: FFTProcessor):
         self._fft = fft
@@ -132,13 +136,18 @@ class AudioPlaybackThread(QThread):
         self._running = True
         hop   = int(self._audio.sr / self._fps)
         total = int(len(self._audio.mono) / hop)
-        sd.play(self._audio.mono, samplerate=self._audio.sr)
-        for i in range(total):
+
+        start_sample = self._start_frame * hop
+        audio_out    = self._audio.mono[start_sample:] * self._volume
+        sd.play(audio_out, samplerate=self._audio.sr)
+
+        for i in range(self._start_frame, total):
             if not self._running:
                 break
             samples = self._audio.get_frame_samples(i, hop, FFT_SIZE)
             bars, pulse = self._fft.process(samples)
             self.frame_ready.emit(bars, pulse)
+            self.position_changed.emit(i, total)
             self.msleep(int(1000 / self._fps))
         sd.stop()
 
@@ -159,6 +168,9 @@ class MainWindow(QMainWindow):
         self._export_thread:   QThread | None = None
         self._bg_image_path:     str | None = None
         self._center_image_path: str | None = None
+        self._volume: float    = 1.0
+        self._seek_frame: int  = 0
+        self._seeking: bool    = False
         _default = [list(c) for c in list(PALETTES.values())[0]]
         self._custom_palette_amp  = [list(c) for c in _default]
         self._custom_palette_freq = [list(c) for c in _default]
@@ -485,6 +497,27 @@ class MainWindow(QMainWindow):
         self._btn_play.clicked.connect(self._toggle_playback)
         pl.addWidget(self._btn_play)
 
+        # ── Transport ──
+        self._seek_slider = QSlider(Qt.Horizontal)
+        self._seek_slider.setRange(0, 1000)
+        self._seek_slider.setValue(0)
+        self._seek_slider.setEnabled(False)
+        self._seek_slider.sliderPressed.connect(self._on_seek_pressed)
+        self._seek_slider.sliderReleased.connect(self._on_seek_released)
+        pl.addWidget(self._seek_slider)
+
+        vol_row = QHBoxLayout()
+        vol_row.addWidget(QLabel("Volume"))
+        self._vol_slider = QSlider(Qt.Horizontal)
+        self._vol_slider.setRange(0, 100)
+        self._vol_slider.setValue(100)
+        self._vol_slider.valueChanged.connect(self._on_volume_changed)
+        self._vol_label = QLabel("100%")
+        self._vol_label.setFixedWidth(36)
+        vol_row.addWidget(self._vol_slider)
+        vol_row.addWidget(self._vol_label)
+        pl.addLayout(vol_row)
+
         self._btn_export = QPushButton("⬇ Exporter MP4")
         self._btn_export.setEnabled(False)
         self._btn_export.clicked.connect(self._start_export)
@@ -612,6 +645,9 @@ class MainWindow(QMainWindow):
         self._file_label.setText(Path(path).name)
         self._btn_play.setEnabled(True)
         self._btn_export.setEnabled(True)
+        self._seek_frame = 0
+        self._seek_slider.setValue(0)
+        self._seek_slider.setEnabled(True)
         self._status.setText(f"Durée : {self._audio.duration:.1f}s · {self._audio.sr} Hz")
 
     def _open_bg_image(self):
@@ -702,6 +738,47 @@ class MainWindow(QMainWindow):
                 self._playback_thread.update_fft(new_fft)
             self._fft = new_fft
 
+    def _on_volume_changed(self, val: int):
+        self._volume = val / 100.0
+        self._vol_label.setText(f"{val}%")
+        if self._playback_thread and self._playback_thread.isRunning():
+            self._restart_playback_from(self._seek_frame)
+
+    def _on_seek_pressed(self):
+        self._seeking = True
+
+    def _on_seek_released(self):
+        if not self._audio:
+            self._seeking = False
+            return
+        hop   = int(self._audio.sr / int(self._combo_fps.currentText()))
+        total = int(len(self._audio.mono) / hop)
+        self._seek_frame = int(self._seek_slider.value() / 1000 * total)
+        self._seeking = False
+        if self._playback_thread and self._playback_thread.isRunning():
+            self._restart_playback_from(self._seek_frame)
+
+    def _on_position_changed(self, frame: int, total: int):
+        if not self._seeking:
+            pos = int(frame / max(total, 1) * 1000)
+            self._seek_slider.setValue(pos)
+        self._seek_frame = frame
+
+    def _restart_playback_from(self, frame: int):
+        if self._playback_thread:
+            self._playback_thread.stop()
+            self._playback_thread.wait()
+        fps = int(self._combo_fps.currentText())
+        self._fft = self._make_fft()
+        self._playback_thread = AudioPlaybackThread(
+            self._audio, self._fft, fps,
+            start_frame=frame, volume=self._volume,
+        )
+        self._playback_thread.frame_ready.connect(self._preview.update_audio_data)
+        self._playback_thread.position_changed.connect(self._on_position_changed)
+        self._playback_thread.finished.connect(self._on_playback_done)
+        self._playback_thread.start()
+
     def _toggle_playback(self):
         if self._playback_thread and self._playback_thread.isRunning():
             self._stop_playback()
@@ -713,8 +790,12 @@ class MainWindow(QMainWindow):
             return
         self._fft = self._make_fft()
         fps = int(self._combo_fps.currentText())
-        self._playback_thread = AudioPlaybackThread(self._audio, self._fft, fps)
+        self._playback_thread = AudioPlaybackThread(
+            self._audio, self._fft, fps,
+            start_frame=self._seek_frame, volume=self._volume,
+        )
         self._playback_thread.frame_ready.connect(self._preview.update_audio_data)
+        self._playback_thread.position_changed.connect(self._on_position_changed)
         self._playback_thread.finished.connect(self._on_playback_done)
         self._playback_thread.start()
         self._btn_play.setText("⏹ Stop")
@@ -727,6 +808,8 @@ class MainWindow(QMainWindow):
 
     def _on_playback_done(self):
         self._btn_play.setText("▶ Preview")
+        self._seek_frame = 0
+        self._seek_slider.setValue(0)
 
     def _start_export(self):
         if not self._audio:
