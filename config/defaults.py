@@ -74,6 +74,7 @@ HALO_SINE_GLOW_LAYERS     = 3      # PIL glow passes
 HALO_SINE_WAVE_SPEED      = 1.5    # traveling wave speed in rad/s
 HALO_SINE_SMOOTHING_DECAY = 0.80   # per-point EMA decay (fast attack, slow release)
 HALO_SINE_FILL_OPACITY    = 0.0    # interior fill opacity (0 = no fill)
+HALO_SINE_SPLINE_GAP      = 1.4    # spline base radius as multiple of center circle radius
 
 BG_PULSE_INTENSITY = 0.5   # BG zoom depth on kick (0-1)
 FLASH_INTENSITY    = 0.5   # white flash opacity on kick (0-1)

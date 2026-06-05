@@ -9,7 +9,7 @@ from config.defaults import (
     NUM_BARS, PALETTES, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    BG_PULSE_INTENSITY, FLASH_INTENSITY,
+    HALO_SINE_SPLINE_GAP, BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
 
@@ -34,6 +34,7 @@ class PreviewWidget(QOpenGLWidget):
         self._halo_glow_layers: int = HALO_SINE_GLOW_LAYERS
         self._halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY
         self._halo_fill_opacity: float = HALO_SINE_FILL_OPACITY
+        self._halo_spline_gap: float = HALO_SINE_SPLINE_GAP
         self._pal_mode: int = 0
         self._bg_pulse: bool = False
         self._bg_pulse_intensity: float = BG_PULSE_INTENSITY
@@ -85,6 +86,7 @@ class PreviewWidget(QOpenGLWidget):
             halo_glow_layers=self._halo_glow_layers,
             halo_smoothing_decay=self._halo_smoothing_decay,
             halo_fill_opacity=self._halo_fill_opacity,
+            halo_spline_gap=self._halo_spline_gap,
             pal_mode=self._pal_mode,
             bg_pulse=self._bg_pulse,
             bg_pulse_intensity=self._bg_pulse_intensity,
@@ -107,6 +109,7 @@ class PreviewWidget(QOpenGLWidget):
                    halo_n_points: int = None, halo_glow_layers: int = None,
                    halo_smoothing_decay: float = None,
                    halo_fill_opacity: float = None,
+                   halo_spline_gap: float = None,
                    pal_mode: int = None,
                    bg_pulse: bool = None,
                    bg_pulse_intensity: float = None,
@@ -138,6 +141,8 @@ class PreviewWidget(QOpenGLWidget):
             self._halo_smoothing_decay = halo_smoothing_decay
         if halo_fill_opacity is not None:
             self._halo_fill_opacity = halo_fill_opacity
+        if halo_spline_gap is not None:
+            self._halo_spline_gap = halo_spline_gap
         if pal_mode is not None:
             self._pal_mode = pal_mode
         if bg_pulse is not None:

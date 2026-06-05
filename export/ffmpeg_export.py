@@ -11,7 +11,7 @@ from config.defaults import (
     RESOLUTIONS, FPS, FFT_SIZE, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    CQT_BINS_PER_OCTAVE, BG_PULSE_INTENSITY, FLASH_INTENSITY,
+    HALO_SINE_SPLINE_GAP, CQT_BINS_PER_OCTAVE, BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
 
@@ -36,6 +36,7 @@ class FFmpegExporter:
                  halo_glow_layers: int = HALO_SINE_GLOW_LAYERS,
                  halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY,
                  halo_fill_opacity: float = HALO_SINE_FILL_OPACITY,
+                 halo_spline_gap: float = HALO_SINE_SPLINE_GAP,
                  pal_mode: int = 0,
                  bg_pulse: bool = False,
                  bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -61,6 +62,7 @@ class FFmpegExporter:
         self.halo_glow_layers = halo_glow_layers
         self.halo_smoothing_decay = halo_smoothing_decay
         self.halo_fill_opacity = halo_fill_opacity
+        self.halo_spline_gap = halo_spline_gap
         self.pal_mode = pal_mode
         self.bg_pulse = bg_pulse
         self.bg_pulse_intensity = bg_pulse_intensity
@@ -137,6 +139,7 @@ class FFmpegExporter:
                     halo_glow_layers=self.halo_glow_layers,
                     halo_smoothing_decay=self.halo_smoothing_decay,
                     halo_fill_opacity=self.halo_fill_opacity,
+                    halo_spline_gap=self.halo_spline_gap,
                     pal_mode=self.pal_mode,
                     bg_pulse=self.bg_pulse,
                     bg_pulse_intensity=self.bg_pulse_intensity,

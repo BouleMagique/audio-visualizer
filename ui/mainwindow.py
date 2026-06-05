@@ -21,7 +21,7 @@ from config.defaults import (
     FREQ_BASS_SPLIT, FREQ_BASS_SPLIT_HZ, CQT_BINS_PER_OCTAVE,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    BG_PULSE_INTENSITY, FLASH_INTENSITY,
+    HALO_SINE_SPLINE_GAP, BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
 _RADIAL_MODES     = {0, 4, 5, 6, 7, 8}
@@ -47,7 +47,8 @@ class ExportWorker(QObject):
                  bass_split, bass_split_hz,
                  use_cqt, bins_per_octave,
                  halo_r_base, halo_amplitude, halo_n_points, halo_glow_layers,
-                 halo_smoothing_decay, halo_fill_opacity, pal_mode: int = 0,
+                 halo_smoothing_decay, halo_fill_opacity, halo_spline_gap,
+                 pal_mode: int = 0,
                  bg_pulse: bool = False, bg_pulse_intensity: float = 0.5,
                  flash: bool = False, flash_intensity: float = 0.5):
         super().__init__()
@@ -70,6 +71,7 @@ class ExportWorker(QObject):
             halo_glow_layers=halo_glow_layers,
             halo_smoothing_decay=halo_smoothing_decay,
             halo_fill_opacity=halo_fill_opacity,
+            halo_spline_gap=halo_spline_gap,
             pal_mode=pal_mode,
             bg_pulse=bg_pulse,
             bg_pulse_intensity=bg_pulse_intensity,
@@ -360,6 +362,10 @@ class MainWindow(QMainWindow):
             hsf, "Remplissage (×0.01)", 0, 100, int(HALO_SINE_FILL_OPACITY * 100),
             self._on_params_changed)
 
+        self._row_hs_gap = self._make_slider_row(
+            hsf, "Distance sine (×0.01)", 100, 250, int(HALO_SINE_SPLINE_GAP * 100),
+            self._on_params_changed)
+
         pl.addWidget(self._halo_sine_group)
 
         # ── Effets beats ──
@@ -597,6 +603,7 @@ class MainWindow(QMainWindow):
             halo_glow_layers=self._sl(self._row_hs_glow).value(),
             halo_smoothing_decay=self._sl(self._row_hs_decay).value() / 100,
             halo_fill_opacity=self._sl(self._row_hs_fill).value() / 100,
+            halo_spline_gap=self._sl(self._row_hs_gap).value() / 100,
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,
@@ -679,6 +686,7 @@ class MainWindow(QMainWindow):
             halo_glow_layers=self._sl(self._row_hs_glow).value(),
             halo_smoothing_decay=self._sl(self._row_hs_decay).value() / 100,
             halo_fill_opacity=self._sl(self._row_hs_fill).value() / 100,
+            halo_spline_gap=self._sl(self._row_hs_gap).value() / 100,
             pal_mode=self._current_pal_mode(),
             bg_pulse=self._chk_bg_pulse.isChecked(),
             bg_pulse_intensity=self._sl(self._row_bg_pulse_intensity).value() / 100,

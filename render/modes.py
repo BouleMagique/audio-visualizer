@@ -67,11 +67,12 @@ class HaloSineMode:
         rotation: float = 0.0,    # starting angle offset in radians
         fill_opacity: float = 0.0, # interior fill opacity (0–1)
         pal_mode: int = 0,         # 0 = amplitude, 1 = fréquence
+        spline_gap: float = 1.4,   # spline base radius as multiple of center circle radius
     ) -> np.ndarray:
         H, W = frame_rgb.shape[:2]
         cx, cy = W / 2.0, H / 2.0
         r_glsl_px   = r_base * H / 2        # GLSL center circle radius in PIL pixels
-        r_base_px   = r_glsl_px * 1.4       # spline just outside center image (~40% beyond)
+        r_base_px   = r_glsl_px * spline_gap
         amp_max_px  = amplitude_max * H
 
         # Bass range: first 65% of bars

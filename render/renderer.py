@@ -6,7 +6,7 @@ from config.defaults import (
     CIRCLE_RADIUS_RATIO, BAR_WIDTH, PALETTES, SENSITIVITY,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
-    BG_PULSE_INTENSITY, FLASH_INTENSITY,
+    HALO_SINE_SPLINE_GAP, BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 from render.modes import HaloSineMode
 
@@ -29,6 +29,7 @@ class Renderer:
         self.height = height
         self._bg_texture: moderngl.Texture | None = None
         self._center_texture: moderngl.Texture | None = None
+        self._center_pil: "Image.Image | None" = None
         self._bass_hist_tex: moderngl.Texture | None = None
         self._bass_history: np.ndarray | None = None
         self._bass_hist2_tex: moderngl.Texture | None = None
@@ -104,7 +105,9 @@ class Renderer:
     def load_center_image(self, path: str) -> None:
         if self._center_texture:
             self._center_texture.release()
-        img = Image.open(path).convert("RGBA").transpose(Image.FLIP_TOP_BOTTOM)
+        pil_src = Image.open(path).convert("RGBA")
+        self._center_pil = pil_src
+        img = pil_src.transpose(Image.FLIP_TOP_BOTTOM)
         self._center_texture = self.ctx.texture(img.size, 4, img.tobytes())
         self._center_texture.build_mipmaps()
         self._center_texture.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
@@ -113,6 +116,7 @@ class Renderer:
         if self._center_texture:
             self._center_texture.release()
             self._center_texture = None
+        self._center_pil = None
 
     def render_frame(self, bars: np.ndarray, pulse: float,
                      num_bars: int = 128,
@@ -129,6 +133,7 @@ class Renderer:
                      halo_glow_layers: int = HALO_SINE_GLOW_LAYERS,
                      halo_smoothing_decay: float = HALO_SINE_SMOOTHING_DECAY,
                      halo_fill_opacity: float = HALO_SINE_FILL_OPACITY,
+                     halo_spline_gap: float = HALO_SINE_SPLINE_GAP,
                      pal_mode: int = 0,
                      bg_pulse: bool = False,
                      bg_pulse_intensity: float = BG_PULSE_INTENSITY,
@@ -208,13 +213,17 @@ class Renderer:
         self._bass_hist2_tex.use(location=3)
         self.prog["u_bass_history2"].value = 3
 
+        # Mode 6: center image is composited AFTER the spline in PIL — skip it in GLSL
+        if viz_type == 6 and self._center_pil is not None:
+            self.prog["u_has_center"].value = 0
+
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
-        # Mode 6: PIL spline overlay composited back onto the FBO
+        # Mode 6: PIL spline overlay, then center image on top
         if viz_type == 6:
             raw       = self.fbo.read(components=3)
             pixels_bt = np.frombuffer(raw, dtype=np.uint8).reshape(self.height, self.width, 3)
-            pixels_tb = np.ascontiguousarray(pixels_bt[::-1])      # flip → top-to-bottom for PIL
+            pixels_tb = np.ascontiguousarray(pixels_bt[::-1])
             result_tb = self._halo_sine.draw_overlay(
                 pixels_tb, bars=bars,
                 r_base=halo_r_base, amplitude_max=halo_amplitude,
@@ -224,9 +233,33 @@ class Renderer:
                 rotation=rotation,
                 fill_opacity=halo_fill_opacity,
                 pal_mode=pal_mode,
+                spline_gap=halo_spline_gap,
             )
-            result_bt = np.ascontiguousarray(result_tb[::-1])      # flip back → bottom-to-top
+            if self._center_pil is not None:
+                result_tb = self._composite_center_circle(
+                    result_tb, self._center_pil,
+                    r_px=halo_r_base * self.height / 2,
+                )
+            result_bt = np.ascontiguousarray(result_tb[::-1])
             self.fbo.color_attachments[0].write(result_bt.tobytes())
+
+    def _composite_center_circle(self, frame_tb: np.ndarray,
+                                  center_pil: "Image.Image",
+                                  r_px: float) -> np.ndarray:
+        from PIL import ImageDraw
+        H, W = frame_tb.shape[:2]
+        cx, cy = W / 2.0, H / 2.0
+        r = max(1, int(r_px))
+        diam = r * 2
+        resized = center_pil.resize((diam, diam), Image.LANCZOS)
+        mask = Image.new("L", (diam, diam), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse([0, 0, diam - 1, diam - 1], fill=255)
+        del draw
+        resized.putalpha(mask)
+        base = Image.fromarray(frame_tb, "RGB").convert("RGBA")
+        base.paste(resized, (int(cx - r), int(cy - r)), resized)
+        return np.array(base.convert("RGB"))
 
     def read_frame(self) -> bytes:
         # OpenGL stores rows bottom-to-top; FFmpeg rawvideo expects top-to-bottom
