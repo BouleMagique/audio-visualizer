@@ -266,21 +266,28 @@ class Renderer:
                 pal_mode=pal_mode,
                 spline_gap=halo_spline_gap,
             )
+            r_px = halo_r_base * self.height / 2
             if self._center_pil is not None:
                 result_tb = self._composite_center_circle(
-                    result_tb, self._center_pil,
-                    r_px=halo_r_base * self.height / 2,
+                    result_tb, self._center_pil, r_px,
+                    pulse=pulse, pulse_intensity=pulse_intensity,
                 )
+            result_tb = self._draw_ring_glow(
+                result_tb, r_px, palette,
+                pulse=pulse, pulse_intensity=pulse_intensity,
+            )
             result_bt = np.ascontiguousarray(result_tb[::-1])
             self.fbo.color_attachments[0].write(result_bt.tobytes())
 
     def _composite_center_circle(self, frame_tb: np.ndarray,
                                   center_pil: "Image.Image",
-                                  r_px: float) -> np.ndarray:
+                                  r_px: float,
+                                  pulse: float = 0.0,
+                                  pulse_intensity: float = 1.0) -> np.ndarray:
         from PIL import ImageDraw
         H, W = frame_tb.shape[:2]
         cx, cy = W / 2.0, H / 2.0
-        r = max(1, int(r_px))
+        r = max(1, int(r_px * (1.0 + 0.10 * pulse * pulse_intensity)))
         diam = r * 2
         resized = center_pil.resize((diam, diam), Image.LANCZOS)
         mask = Image.new("L", (diam, diam), 0)
@@ -291,6 +298,48 @@ class Renderer:
         base = Image.fromarray(frame_tb, "RGB").convert("RGBA")
         base.paste(resized, (int(cx - r), int(cy - r)), resized)
         return np.array(base.convert("RGB"))
+
+    def _draw_ring_glow(self, frame_tb: np.ndarray,
+                        r_px: float,
+                        palette: list,
+                        pulse: float = 0.0,
+                        pulse_intensity: float = 1.0) -> np.ndarray:
+        from PIL import ImageDraw
+        H, W = frame_tb.shape[:2]
+        cx, cy = int(W / 2), int(H / 2)
+        r = int(r_px * (1.0 + 0.10 * pulse * pulse_intensity))
+        r = max(4, r)
+
+        pal0 = tuple(int(c * 255) for c in palette[0][:3])
+        pal1 = tuple(int(c * 255) for c in palette[1][:3])
+
+        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        # Soft central glow (pal0, fills inside the circle)
+        rg = int(r * 1.5)
+        draw.ellipse([cx - rg, cy - rg, cx + rg, cy + rg], fill=(*pal0, 20))
+        draw.ellipse([cx - r,  cy - r,  cx + r,  cy + r],  fill=(*pal0, 12))
+
+        # Wide outer glow passes (pal0, additive-like)
+        for i in range(7, 0, -1):
+            extra = i * max(1, r // 35)
+            alpha = i * 5
+            draw.ellipse(
+                [cx - r - extra, cy - r - extra, cx + r + extra, cy + r + extra],
+                outline=(*pal0, alpha), width=extra + 1,
+            )
+
+        # Bright core ring (pal1)
+        rw = max(2, r // 20)
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(*pal1, 200), width=rw)
+        # White-hot center line
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r],
+                     outline=(255, 255, 255, 85), width=max(1, rw // 2))
+
+        del draw
+        base = Image.fromarray(frame_tb, "RGB").convert("RGBA")
+        return np.array(Image.alpha_composite(base, overlay).convert("RGB"))
 
     def read_frame(self) -> bytes:
         # OpenGL stores rows bottom-to-top; FFmpeg rawvideo expects top-to-bottom

@@ -436,30 +436,10 @@ void main() {
 
         color *= 0.92 + 0.08 * sin(v_uv.y * 900.0 * PI);
 
-    // ── Halo Sine — bg + circle ring + center image; spline drawn by PIL ──
+    // ── Halo Sine — background only; spline, ring, and center image drawn by PIL ──
     } else if (u_viz_type == 6) {
-        vec2  uv_c = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
-        float dist = length(uv_c);
-        float r    = u_halo_r_base * (1.0 + 0.10 * u_pulse * u_pulse_intensity);
-
-        // Glowing ring at base radius (matches spline center)
-        float ring_w = r * 0.025;
-        float ring_d = abs(dist - r);
-        color += u_pal1 * smoothstep(ring_w * 2.0, 0.0, ring_d) * 0.70;
-        color += u_pal0 * smoothstep(ring_w * 8.0, 0.0, ring_d) * 0.25;
-
-        // Soft central glow
-        color += smoothstep(r * 1.5, 0.0, dist) * 0.18 * u_pal0;
-
-        // Center image (RGBA — supports transparent PNG)
-        if (u_has_center == 1) {
-            vec2  uv_ctr = uv_c / r * 0.5 + 0.5;
-            float mask   = smoothstep(r, r * 0.82, dist);
-            if (uv_ctr.x >= 0.0 && uv_ctr.x <= 1.0 && uv_ctr.y >= 0.0 && uv_ctr.y <= 1.0) {
-                vec4 s = texture(u_center_texture, uv_ctr);
-                color  = mix(color, s.rgb, s.a * mask);
-            }
-        }
+        // Ring, glow, and center image are composited in Python so they appear
+        // above the spline overlay. Nothing to add here beyond the background.
     }
 
     if (u_flash_enabled == 1) {
