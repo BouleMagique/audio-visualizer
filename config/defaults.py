@@ -65,6 +65,8 @@ VIZ_TYPES = {
     "Halo Bass 2": 7,
     "Tunnel Arcade": 8,
     "Sine Plat": 9,
+    "Nuclear Shockwave": 10,
+    "Void Pull": 11,
 }
 
 # Halo Sine mode defaults

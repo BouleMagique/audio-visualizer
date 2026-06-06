@@ -36,6 +36,7 @@ uniform float u_bg_pulse_intensity;
 uniform int   u_flash_enabled;     // 1 = white flash on bass hits
 uniform float u_flash_intensity;
 uniform int   u_mirror;           // 1 = each half covers the full spectrum
+uniform int   u_force_black_bg;   // 1 = render on pure black (for additive layer compositing)
 uniform float u_bass;             // mean energy, first 30 % of bars
 uniform float u_mid;              // mean energy, 30–70 %
 uniform float u_high;             // mean energy, 70–100 %
@@ -137,6 +138,7 @@ void main() {
     }
     vec3 bg = (u_has_bg == 1) ? texture(u_bg_texture, bg_uv).rgb
                                : vec3(0.039, 0.039, 0.059);
+    if (u_force_black_bg == 1) bg = vec3(0.0);
     vec3 color = bg;
 
     // ── Radial ──────────────────────────────────────────────────
@@ -467,6 +469,96 @@ void main() {
     } else if (u_viz_type == 6) {
         // Ring, glow, and center image are composited in Python so they appear
         // above the spline overlay. Nothing to add here beyond the background.
+
+    // ── Nuclear Shockwave — cosmic noise + 4 concentric shockwaves on kick ──
+    } else if (u_viz_type == 10) {
+        vec2  uvc10  = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
+        float r10    = length(uvc10);
+        float ang10  = atan(uvc10.y, uvc10.x);
+
+        // Two animated noise layers for organic cosmic background
+        vec2  nf1    = floor(v_uv * 14.0 + u_time * vec2(0.41, 0.29));
+        vec2  nf2    = floor(v_uv * 29.0 + u_time * vec2(0.17, 0.53));
+        float n1     = fract(sin(dot(nf1, vec2(127.1, 311.7))) * 43758.5);
+        float n2     = fract(sin(dot(nf2, vec2(269.5, 183.3))) * 43758.5);
+        float nbg    = (n1 + n2) * 0.5;
+
+        // Static star particles
+        float stars  = step(0.998, fract(sin(dot(floor(v_uv * 220.0),
+                            vec2(127.1, 311.7))) * 43758.5));
+
+        // Cosmic background: noise driven by bass + faint central palette glow
+        color = nbg * u_bass * u_pal0 * 0.40
+              + stars * u_pal4 * 0.95
+              + u_pal0 * 0.025 * (1.0 - clamp(r10 * 0.5, 0.0, 1.0));
+
+        // Ambient background rings with sub-bass radial distortion
+        float sub_r  = r10 + u_bass * 0.05 * sin(ang10 * 6.0 + u_time * 1.2);
+        float rphase = mod(sub_r * 4.5 + u_time * 0.10, 1.0);
+        float aring  = smoothstep(0.04, 0.0, min(rphase, 1.0 - rphase));
+        color += aring * u_pal0 * 0.06 * (1.0 + u_bass * 2.5);
+
+        // 4 shockwaves with phase offset — expand and fade driven by kick_accum
+        float kpow10 = u_kick_accum;
+        for (int i10 = 0; i10 < 4; i10++) {
+            float fi10       = float(i10);
+            float waveRadius = mod(u_time * kpow10 * 0.8 - fi10 * 0.18, 1.2);
+            float waveFade   = 1.0 - clamp(waveRadius / 1.2, 0.0, 1.0);
+            float wave = (1.0 - smoothstep(0.0, 0.04, abs(r10 - waveRadius)))
+                         * waveFade * kpow10;
+            color += wave * mix(u_pal3, u_pal1, waveFade);
+        }
+
+        // Kick traîne: radial glow emanating from center (kick_accum decay)
+        color += kpow10 * smoothstep(0.55, 0.0, r10) * 0.28 * u_pal2;
+
+        // Whiteout: pow(kick * kpow, 3) * 0.5
+        float wo10 = clamp(pow(u_kick * kpow10, 3.0) * 0.5, 0.0, 1.0);
+        color = mix(color, vec3(1.0), wo10);
+
+    // ── Void Pull — abyssal spiral pulled inward on kick ──────────────────
+    } else if (u_viz_type == 11) {
+        vec2  uvc11  = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
+        float r11    = length(uvc11);
+        float ang11  = atan(uvc11.y, uvc11.x);
+
+        // Gravity pull distortion: inward warp on kick_accum
+        float pull   = u_kick_accum * 0.65;
+        float r_d    = r11 * (1.0 - pull * exp(-r11 * 2.0));
+
+        // Bass-driven rotation speed + palette hue
+        float spd11  = 0.40 + u_bass * 1.5;
+        float hue11  = fract(u_time * 0.06 + u_bass * 0.35);
+
+        // 3-arm spiral rotating at spd11
+        float spv    = mod(r_d * 6.0 - ang11 / (2.0 * PI) * 3.0
+                           - u_time * spd11, 1.0);
+        float spiral = smoothstep(0.05, 0.0, min(spv, 1.0 - spv));
+
+        // Concentric rings scrolling inward
+        float rnv    = mod(r_d * 4.0 - u_time * spd11 * 0.5, 1.0);
+        float rings  = smoothstep(0.04, 0.0, min(rnv, 1.0 - rnv));
+
+        // Void mask: smooth black hole at center
+        float vmask  = smoothstep(0.0, 0.15, r11);
+
+        // Very dark background — near-black void
+        color = u_pal0 * 0.03 * (1.0 - clamp(r11 * 0.5, 0.0, 1.0));
+
+        // Spiral + rings
+        vec3 spCol = hsv2rgb(vec3(hue11, 0.85, 1.0));
+        color += spiral * spCol * 0.75 * vmask;
+        color += rings * mix(u_pal0, u_pal2, clamp(r11, 0.0, 1.0)) * 0.35 * vmask;
+
+        // Radial light rays on high frequencies + kick: sin(angle*12 + time*10) * kick
+        float rays = sin(ang11 * 12.0 + u_time * 10.0)
+                     * u_kick * (1.0 - clamp(r11 * 0.7, 0.0, 1.0));
+        color += clamp(rays * u_high * 3.0, 0.0, 1.0) * u_pal4 * vmask;
+
+        // Whiteout radial: pow(kick, 3) * 0.4 * (1 - r * 0.5)
+        float wo11 = clamp(pow(u_kick, 3.0) * 0.4 * (1.0 - r11 * 0.5) * vmask,
+                           0.0, 1.0);
+        color = mix(color, vec3(1.0), wo11);
     }
 
     if (u_flash_enabled == 1) {
