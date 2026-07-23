@@ -94,6 +94,20 @@ TUNNEL_KICK_FREQ_HI     = 12    # band upper bound as % of num_bars (~sub-bass)
 TUNNEL_KICK_THRESHOLD   = 250   # ×0.01 → mode 2: ratio×BG (2.5×), mode 3: abs (0-1)
 TUNNEL_KICK_COOLDOWN    = 20    # refractory period in frames
 
+# Nuclear Shockwave mode defaults (mode 10)
+NUKE_KICK_THRESHOLD = 30     # ×0.001 → pulse margin above adaptive avg to fire a wave
+NUKE_SPEED          = 0.95   # shockwave expansion speed
+NUKE_LIFE           = 2.2    # shockwave lifetime (seconds)
+NUKE_WIDTH          = 1.0    # ring thickness multiplier
+NUKE_FLASH          = 0.6    # whiteout intensity on impact
+NUKE_BG             = 1.0    # nebula / starfield background brightness
+
+# Void Pull mode defaults (mode 11)
+VOID_SPEED = 0.10   # constant rotation speed (slow, hypnotic)
+VOID_PULL  = 0.60   # gravity contraction strength on kick/bass (driven by pulse)
+VOID_RAYS  = 2.8    # high-frequency light-ray intensity
+VOID_ARMS  = 3      # spiral arm count
+
 BG_PULSE_INTENSITY = 0.5   # BG zoom depth on kick (0-1)
 FLASH_INTENSITY    = 0.5   # white flash opacity on kick (0-1)
 

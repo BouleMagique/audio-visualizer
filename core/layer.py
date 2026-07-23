@@ -20,6 +20,8 @@ from config.defaults import (
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
     TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
     TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
+    NUKE_KICK_THRESHOLD, NUKE_SPEED, NUKE_LIFE, NUKE_WIDTH, NUKE_FLASH, NUKE_BG,
+    VOID_SPEED, VOID_PULL, VOID_RAYS, VOID_ARMS,
     FLASH_INTENSITY, BG_PULSE_INTENSITY, VIZ_TYPES,
 )
 
@@ -85,6 +87,20 @@ class Layer:
     tunnel_kick_freq_hi: int = TUNNEL_KICK_FREQ_HI
     tunnel_kick_threshold: float = TUNNEL_KICK_THRESHOLD / 100.0
     tunnel_kick_cooldown: int = TUNNEL_KICK_COOLDOWN
+
+    # ── Nuclear Shockwave (mode 10) ──
+    nuke_kick_threshold: float = NUKE_KICK_THRESHOLD / 1000.0
+    nuke_speed: float = NUKE_SPEED
+    nuke_life: float = NUKE_LIFE
+    nuke_width: float = NUKE_WIDTH
+    nuke_flash: float = NUKE_FLASH
+    nuke_bg: float = NUKE_BG
+
+    # ── Void Pull (mode 11) ──
+    void_speed: float = VOID_SPEED
+    void_pull: float = VOID_PULL
+    void_rays: float = VOID_RAYS
+    void_arms: int = VOID_ARMS
 
     id: int = field(default_factory=lambda: next(_id_counter))
 

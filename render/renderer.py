@@ -37,6 +37,15 @@ class LayerState:
         self.kick_cooldown: int = 0
         self.kick_bg_ema: float = 0.0
 
+        # Mode 10 shockwaves: ring buffer of spawn times (seconds) + adaptive
+        # bass-onset detector (independent of the Tunnel kick settings, so it
+        # fires reliably on sustained techno).
+        self.shock_times = np.full(8, -100.0, dtype="f4")
+        self.shock_ptr: int = 0
+        self.shock_avg: float = 0.0       # slow-tracking background pulse level
+        self.shock_armed: bool = True     # hysteresis gate — one wave per kick
+        self.shock_cooldown: int = 0
+
         self.bass_smooth2 = np.zeros(_BASS_HIST_W, dtype=np.float32)
         self.bass_history  = np.zeros((_BASS_HIST_N, _BASS_HIST_W), dtype=np.float32)
         self.bass_history2 = np.zeros((_BASS_HIST_N, _BASS_HIST_W), dtype=np.float32)
@@ -292,6 +301,19 @@ class Renderer:
         self.prog["u_flash_enabled"].value = int(layer.flash)
         self.prog["u_flash_intensity"].value = float(layer.flash_intensity)
 
+        # Nuclear Shockwave (mode 10) params
+        self.prog["u_nuke_speed"].value = float(layer.nuke_speed)
+        self.prog["u_nuke_life"].value = float(layer.nuke_life)
+        self.prog["u_nuke_width"].value = float(layer.nuke_width)
+        self.prog["u_nuke_flash"].value = float(layer.nuke_flash)
+        self.prog["u_nuke_bg"].value = float(layer.nuke_bg)
+
+        # Void Pull (mode 11) params
+        self.prog["u_void_speed"].value = float(layer.void_speed)
+        self.prog["u_void_pull"].value = float(layer.void_pull)
+        self.prog["u_void_rays"].value = float(layer.void_rays)
+        self.prog["u_void_arms"].value = int(layer.void_arms)
+
         # Lissajous / Halo animation uniforms
         bar_slice = lbars[:n]
         total_energy = float(bar_slice.sum()) + 1e-6
@@ -319,7 +341,7 @@ class Renderer:
         self.prog["u_bass_history2"].value = 3
 
         # Audio band decomposition + kick detection (Tunnel Arcade)
-        self._update_kick(st, layer, lbars)
+        self._update_kick(st, layer, lbars, time, pulse)
 
         # Mode 6: center image composited AFTER spline in PIL — skip in GLSL
         if viz_type == 6 and self._center_pil is not None:
@@ -333,7 +355,8 @@ class Renderer:
         elif viz_type == 9:
             self._post_flat_sine(st, layer, lbars, palette)
 
-    def _update_kick(self, st: LayerState, layer: Layer, bars: np.ndarray) -> None:
+    def _update_kick(self, st: LayerState, layer: Layer, bars: np.ndarray,
+                     time: float, pulse: float) -> None:
         n_used = min(len(bars), layer.num_bars)
         bar_sl = bars[:n_used] if n_used > 0 else np.zeros(1, dtype="f4")
         n_bass = max(1, int(n_used * 0.30))
@@ -388,11 +411,31 @@ class Renderer:
         st.prev_bass = bass_v
         st.kick_accum = max(kick_n, st.kick_accum * 0.88)
 
+        # Mode 10: spawn exactly one shockwave per kick. Adaptive onset on the
+        # FFT pulse (sub-bass envelope) with hysteresis: the detector arms when
+        # pulse falls back near its slow-tracking average, then fires once when it
+        # rises a margin above that average. The slow-release pulse tail can't
+        # re-trigger because the gate stays disarmed until pulse drops again.
+        st.shock_avg = st.shock_avg * 0.96 + pulse * 0.04
+        margin = layer.nuke_kick_threshold        # margin above background level
+        hi = st.shock_avg + margin
+        lo = st.shock_avg + margin * 0.4
+        if st.shock_cooldown > 0:
+            st.shock_cooldown -= 1
+        if not st.shock_armed and pulse < lo:
+            st.shock_armed = True
+        if st.shock_armed and pulse > hi and pulse > 0.05 and st.shock_cooldown == 0:
+            st.shock_times[st.shock_ptr] = float(time)
+            st.shock_ptr = (st.shock_ptr + 1) % len(st.shock_times)
+            st.shock_armed = False
+            st.shock_cooldown = 6                  # safety floor (~0.1 s)
+
         self.prog["u_bass"].value = bass_v
         self.prog["u_mid"].value = mid_v
         self.prog["u_high"].value = high_v
         self.prog["u_kick"].value = kick_n
         self.prog["u_kick_accum"].value = float(st.kick_accum)
+        self.prog["u_shock_times"].value = tuple(st.shock_times.tolist())
         self.prog["u_tunnel_sides"].value = int(layer.tunnel_sides)
         self.prog["u_tunnel_rings"].value = int(layer.tunnel_rings)
         self.prog["u_tunnel_speed"].value = float(layer.tunnel_speed)

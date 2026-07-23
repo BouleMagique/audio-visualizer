@@ -28,6 +28,8 @@ from config.defaults import (
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
     TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
     TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
+    NUKE_KICK_THRESHOLD, NUKE_SPEED, NUKE_LIFE, NUKE_WIDTH, NUKE_FLASH, NUKE_BG,
+    VOID_SPEED, VOID_PULL, VOID_RAYS, VOID_ARMS,
     BG_PULSE_INTENSITY, FLASH_INTENSITY,
 )
 
@@ -41,6 +43,8 @@ _HALO_MODES       = {4, 5, 6, 7, 8}
 _HALO_SINE_MODES  = {6, 9}
 _TUNNEL_MODES     = {8}
 _MIRROR_MODES     = {0, 4}
+_NUKE_MODES       = {10}
+_VOID_MODES       = {11}
 
 _AMP_LABELS  = ["Silence", "Faible", "Moyen", "Fort", "Saturation"]
 _FREQ_LABELS = ["Grave", "Basse", "Médium", "Présence", "Aigu"]
@@ -451,6 +455,36 @@ class MainWindow(QMainWindow):
             tg_f, "Vitesse audio (×0.01)", 0, 1000, int(TUNNEL_BASS_SPEED * 100), self._on_params_changed)
         pl.addWidget(self._tunnel_group)
 
+        # ── Nuclear Shockwave (mode 10) ──
+        self._nuke_group = QGroupBox("Nuclear Shockwave")
+        nk_f = QFormLayout(self._nuke_group)
+        self._row_nuke_thresh = self._make_slider_row(
+            nk_f, "Seuil kick (×0.001)", 5, 150, NUKE_KICK_THRESHOLD, self._on_params_changed)
+        self._row_nuke_speed = self._make_slider_row(
+            nk_f, "Vitesse onde (×0.01)", 20, 300, int(NUKE_SPEED * 100), self._on_params_changed)
+        self._row_nuke_life = self._make_slider_row(
+            nk_f, "Durée vie (×0.1 s)", 5, 60, int(NUKE_LIFE * 10), self._on_params_changed)
+        self._row_nuke_width = self._make_slider_row(
+            nk_f, "Épaisseur (×0.01)", 30, 400, int(NUKE_WIDTH * 100), self._on_params_changed)
+        self._row_nuke_flash = self._make_slider_row(
+            nk_f, "Flash (×0.01)", 0, 100, int(NUKE_FLASH * 100), self._on_params_changed)
+        self._row_nuke_bg = self._make_slider_row(
+            nk_f, "Fond (×0.01)", 0, 300, int(NUKE_BG * 100), self._on_params_changed)
+        pl.addWidget(self._nuke_group)
+
+        # ── Void Pull (mode 11) ──
+        self._void_group = QGroupBox("Void Pull")
+        vd_f = QFormLayout(self._void_group)
+        self._row_void_speed = self._make_slider_row(
+            vd_f, "Vitesse rotation (×0.01)", 0, 100, int(VOID_SPEED * 100), self._on_params_changed)
+        self._row_void_pull = self._make_slider_row(
+            vd_f, "Distorsion kick/bass (×0.01)", 0, 150, int(VOID_PULL * 100), self._on_params_changed)
+        self._row_void_rays = self._make_slider_row(
+            vd_f, "Rayons aigus (×0.01)", 0, 600, int(VOID_RAYS * 100), self._on_params_changed)
+        self._row_void_arms = self._make_slider_row(
+            vd_f, "Bras spirale", 1, 8, VOID_ARMS, self._on_params_changed)
+        pl.addWidget(self._void_group)
+
         # ── Effets beats (par calque) ──
         beats_g = QGroupBox("Effets beats")
         beats_f = QFormLayout(beats_g)
@@ -658,6 +692,20 @@ class MainWindow(QMainWindow):
         self._sl(self._row_tunnel_kick_sens).setValue(int(layer.tunnel_kick_sensitivity * 100))
         self._sl(self._row_tunnel_bass_speed).setValue(int(layer.tunnel_bass_speed * 100))
 
+        # nuclear shockwave
+        self._sl(self._row_nuke_thresh).setValue(int(round(layer.nuke_kick_threshold * 1000)))
+        self._sl(self._row_nuke_speed).setValue(int(layer.nuke_speed * 100))
+        self._sl(self._row_nuke_life).setValue(int(layer.nuke_life * 10))
+        self._sl(self._row_nuke_width).setValue(int(layer.nuke_width * 100))
+        self._sl(self._row_nuke_flash).setValue(int(layer.nuke_flash * 100))
+        self._sl(self._row_nuke_bg).setValue(int(layer.nuke_bg * 100))
+
+        # void pull
+        self._sl(self._row_void_speed).setValue(int(layer.void_speed * 100))
+        self._sl(self._row_void_pull).setValue(int(layer.void_pull * 100))
+        self._sl(self._row_void_rays).setValue(int(layer.void_rays * 100))
+        self._sl(self._row_void_arms).setValue(layer.void_arms)
+
         # flash
         self._chk_flash.setChecked(layer.flash)
         self._sl(self._row_flash_intensity).setValue(int(layer.flash_intensity * 100))
@@ -702,6 +750,16 @@ class MainWindow(QMainWindow):
         layer.tunnel_chroma = self._sl(self._row_tunnel_chroma).value() / 100
         layer.tunnel_kick_sensitivity = self._sl(self._row_tunnel_kick_sens).value() / 100
         layer.tunnel_bass_speed = self._sl(self._row_tunnel_bass_speed).value() / 100
+        layer.nuke_kick_threshold = self._sl(self._row_nuke_thresh).value() / 1000.0
+        layer.nuke_speed = self._sl(self._row_nuke_speed).value() / 100
+        layer.nuke_life = self._sl(self._row_nuke_life).value() / 10
+        layer.nuke_width = self._sl(self._row_nuke_width).value() / 100
+        layer.nuke_flash = self._sl(self._row_nuke_flash).value() / 100
+        layer.nuke_bg = self._sl(self._row_nuke_bg).value() / 100
+        layer.void_speed = self._sl(self._row_void_speed).value() / 100
+        layer.void_pull = self._sl(self._row_void_pull).value() / 100
+        layer.void_rays = self._sl(self._row_void_rays).value() / 100
+        layer.void_arms = self._sl(self._row_void_arms).value()
         layer.flash = self._chk_flash.isChecked()
         layer.flash_intensity = self._sl(self._row_flash_intensity).value() / 100
 
@@ -739,6 +797,8 @@ class MainWindow(QMainWindow):
         self._set_row_visible(self._row_hs_gap,    is_halo_circle)
         self._set_row_visible(self._row_hs_pixel,  is_halo_circle)
         self._tunnel_group.setVisible(is_tunnel)
+        self._nuke_group.setVisible(viz_type in _NUKE_MODES)
+        self._void_group.setVisible(viz_type in _VOID_MODES)
         self._chk_mirror.setVisible(has_mirror)
         pal_name = self._combo_palette.currentText()
         self._custom_amp_group.setVisible(pal_name == _PERSO_AMP)
