@@ -13,7 +13,7 @@ A self-contained build with Python, Qt, ModernGL and the shaders all bundled. No
 | OS | File | Run |
 |----|------|-----|
 | **Linux** | `AudioVisualizer-x86_64.AppImage` | `chmod +x AudioVisualizer-x86_64.AppImage` then double-click or `./AudioVisualizer-x86_64.AppImage` |
-| **Windows** | *(build from source for now)* | — |
+| **Windows** | `AudioVisualizer.exe` | double-click (SmartScreen: *More info → Run anyway*) |
 | **macOS** | *(build from source for now)* | — |
 
 Grab it from the **[Releases](https://github.com/BouleMagique/audio-visualizer/releases)** page, or build it yourself (below).
