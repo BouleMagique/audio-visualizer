@@ -2,6 +2,10 @@ name: Build Windows exe
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de la release ou uploader l'exe"
+        required: true
   push:
     tags: ['v*']
 
@@ -31,10 +35,14 @@ jobs:
             --collect-all moderngl --collect-all glcontext `
             main.py
 
-      - name: Upload to release v0.1.0
+      # La cible est le tag qui a declenche le build (push de tag), ou celui passe
+      # en input (dispatch manuel) — jamais un tag en dur, sinon une rebuild ecrase
+      # les assets d'une version deja publiee.
+      - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload v0.1.0 dist/AudioVisualizer.exe --clobber
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release upload "$env:TAG" dist/AudioVisualizer.exe --clobber
 
       - uses: actions/upload-artifact@v4
         with:
