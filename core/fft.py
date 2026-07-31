@@ -23,7 +23,9 @@ class FFTProcessor:
         self.fft_size = fft_size
         self.num_bars = num_bars
         self.freq_min = freq_min
-        self.freq_max = freq_max
+        # Below Nyquist there is no spectrum to bin: a 22 kHz file would otherwise
+        # put the top bars past the last FFT bin and read nothing.
+        self.freq_max = min(freq_max, sr * 0.5 * 0.99)
         self.smoothing_decay = smoothing_decay
         self.bass_split = bass_split
         self.bass_split_hz = bass_split_hz
@@ -36,6 +38,18 @@ class FFTProcessor:
             self._build_cqt_bins()
         else:
             self._build_log_bins()
+        self._pack_bin_ranges(fft_size // 2 + 1)
+
+    def _pack_bin_ranges(self, n_freqs: int):
+        """Turn _bin_ranges into flat arrays so process() can bin without a loop."""
+        lo = np.array([r[0] for r in self._bin_ranges], dtype=np.intp)
+        hi = np.array([r[1] for r in self._bin_ranges], dtype=np.intp)
+        # Ranges the loop would have skipped (empty, or past the end of the spectrum)
+        # stay flagged here and are zeroed in process().
+        self._bin_valid  = (lo < hi) & (hi <= n_freqs)
+        self._bin_lo     = np.clip(lo, 0, n_freqs)
+        self._bin_hi     = np.clip(hi, 0, n_freqs)
+        self._bin_counts = np.maximum(self._bin_hi - self._bin_lo, 1).astype(np.float64)
 
     def _build_cqt_bins(self):
         freqs = np.fft.rfftfreq(self.fft_size, 1.0 / self.sr)
@@ -44,18 +58,18 @@ class FFTProcessor:
         # Q = 1 / (2^(1/bins_per_octave) - 1)
         Q = 1.0 / (2.0 ** (1.0 / self.bins_per_octave) - 1.0)
 
-        # Total CQT bins spanning freq_min..freq_max
+        # k spans exactly freq_min..freq_max, so the centers stay in range whatever
+        # bins_per_octave is: high values give more CQT bins than bars (sub-sampled),
+        # low values fewer (over-sampled, neighbouring bars overlap).
         n_octaves = np.log2(self.freq_max / self.freq_min)
-        total_bins = max(self.num_bars, int(np.ceil(n_octaves * self.bins_per_octave)))
-
-        # Sub-sample to num_bars if total_bins > num_bars
-        k_indices = np.linspace(0, total_bins - 1, self.num_bars)
+        k_indices = np.linspace(0.0, n_octaves * self.bins_per_octave, self.num_bars)
         f_centers = self.freq_min * 2.0 ** (k_indices / self.bins_per_octave)
 
         self._bin_ranges = []
         for f_c in f_centers:
             half_bw = f_c / (2.0 * Q)
             lo = np.searchsorted(freqs, max(f_c - half_bw, freqs[1]))
+            lo = min(lo, len(freqs) - 1)          # keep the slice non-empty
             hi = np.searchsorted(freqs, f_c + half_bw)
             hi = min(max(hi, lo + 1), len(freqs))
             self._bin_ranges.append((lo, hi))
@@ -93,9 +107,16 @@ class FFTProcessor:
         windowed = samples * self.window
         spectrum = np.abs(rfft(windowed))
 
-        bars = np.zeros(self.num_bars, dtype=np.float32)
-        for i, (lo, hi) in enumerate(self._bin_ranges):
-            bars[i] = spectrum[lo:hi].mean() if hi <= len(spectrum) else 0.0
+        # Bin means as differences of a running sum: one vectorised pass instead of a
+        # Python loop over up to 256 ranges. Ranges may overlap, which is fine — each
+        # one is read independently.
+        # float64 accumulation: spectrum is float32, and a running sum over 4000+ bins
+        # loses too much precision to differencing at single precision.
+        csum = np.concatenate(([0.0], np.cumsum(spectrum, dtype=np.float64)))
+        bars = (csum[self._bin_hi] - csum[self._bin_lo]) / self._bin_counts
+        # Empty or out-of-range slices would mean() to NaN, and NaN sticks forever in
+        # the renderers' EMA state — never let one out of here.
+        bars = np.where(self._bin_valid, bars, 0.0).astype(np.float32)
 
         # Apply frequency emphasis before log (multiplicative in linear = additive in dB)
         bars *= self._freq_weights

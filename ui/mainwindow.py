@@ -1,5 +1,6 @@
 import math
 import copy
+import time
 import numpy as np
 import sounddevice as sd
 from pathlib import Path
@@ -20,6 +21,7 @@ from ui.preview import PreviewWidget
 from config.defaults import (
     NUM_BARS, MAX_BAR_HEIGHT, SMOOTHING_DECAY, PULSE_INTENSITY,
     SENSITIVITY, FPS, RESOLUTIONS, FFT_SIZE, PALETTES, VIZ_TYPES,
+    VIZ_TYPES_VISIBLE, DEFAULT_VIZ_TYPE,
     FREQ_BASS_SPLIT, FREQ_BASS_SPLIT_HZ, CQT_BINS_PER_OCTAVE,
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
@@ -87,6 +89,9 @@ class ExportWorker(QObject):
             self.error.emit(str(e))
 
 
+_THREAD_STOP_TIMEOUT_MS = 2000
+
+
 class AudioPlaybackThread(QThread):
     frame_ready      = Signal(object, float)
     position_changed = Signal(int, int)
@@ -106,21 +111,34 @@ class AudioPlaybackThread(QThread):
 
     def run(self):
         self._running = True
-        hop   = int(self._audio.sr / self._fps)
+        hop   = max(1, int(self._audio.sr / self._fps))
         total = int(len(self._audio.mono) / hop)
 
         start_sample = self._start_frame * hop
         audio_out    = self._audio.mono[start_sample:] * self._volume
         sd.play(audio_out, samplerate=self._audio.sr)
 
-        for i in range(self._start_frame, total):
-            if not self._running:
-                break
+        t0 = time.perf_counter()
+        i  = self._start_frame
+        while self._running and i < total:
             samples = self._audio.get_frame_samples(i, hop, FFT_SIZE)
             bars, pulse = self._fft.process(samples)
             self.frame_ready.emit(bars, pulse)
             self.position_changed.emit(i, total)
-            self.msleep(int(1000 / self._fps))
+
+            # The next frame is whichever one the elapsed time points at, not i+1: a slow
+            # render drops frames instead of pushing the whole preview behind the audio.
+            # int(1000/fps) also truncates (16 ms for 60 fps, not 16.667), which on its own
+            # walked the preview 3% off the audio clock over a track.
+            # Target the next boundary strictly ahead of now (+1): when rendering runs
+            # late this still yields for the rest of the frame instead of spinning with
+            # no sleep at all, which would starve the GUI thread of the GIL.
+            elapsed = time.perf_counter() - t0
+            nxt     = max(i + 1, self._start_frame + int(elapsed * self._fps) + 1)
+            delay   = (nxt - self._start_frame) / self._fps - elapsed
+            if delay > 0:
+                self.msleep(max(1, int(delay * 1000)))
+            i = nxt
         sd.stop()
 
     def stop(self):
@@ -146,7 +164,7 @@ class MainWindow(QMainWindow):
         self._loading: bool    = False    # guards UI→layer writes during load
 
         self._lm = LayerManager()
-        self._lm.add_layer(mode=0)
+        self._lm.add_layer(mode=DEFAULT_VIZ_TYPE)
 
         # Editing buffers for the custom palettes of the selected layer
         _default = [list(c) for c in list(PALETTES.values())[0]]
@@ -307,7 +325,7 @@ class MainWindow(QMainWindow):
         vg = QGroupBox("Visuel")
         vl = QFormLayout(vg)
         self._combo_viz = QComboBox()
-        for name in VIZ_TYPES:
+        for name in VIZ_TYPES_VISIBLE:
             self._combo_viz.addItem(name)
         self._combo_viz.currentIndexChanged.connect(self._on_viz_changed)
         vl.addRow("Type", self._combo_viz)
@@ -533,6 +551,10 @@ class MainWindow(QMainWindow):
         self._vol_slider.setRange(0, 100)
         self._vol_slider.setValue(100)
         self._vol_slider.valueChanged.connect(self._on_volume_changed)
+        # Restarting playback is what actually applies a new volume, and it tears down
+        # the audio stream and the FFT. Do it once the slider is let go, never on every
+        # value emitted during a drag.
+        self._vol_slider.sliderReleased.connect(self._on_volume_released)
         self._vol_label = QLabel("100%")
         self._vol_label.setFixedWidth(36)
         vol_row.addWidget(self._vol_slider)
@@ -610,7 +632,7 @@ class MainWindow(QMainWindow):
         if len(self._lm.layers) >= MAX_VISUAL_LAYERS:
             self._status.setText(f"Maximum {MAX_VISUAL_LAYERS} calques.")
             return
-        self._lm.add_layer(mode=0)
+        self._lm.add_layer(mode=DEFAULT_VIZ_TYPE)
         self._refresh_layer_list()
         self._load_layer_into_ui(self._lm.selected())
 
@@ -962,6 +984,12 @@ class MainWindow(QMainWindow):
     def _on_volume_changed(self, val: int):
         self._volume = val / 100.0
         self._vol_label.setText(f"{val}%")
+        # No restart here: a drag emits dozens of these per second, and each restart
+        # stops and recreates the playback thread and the shared audio stream.
+        if not self._vol_slider.isSliderDown():
+            self._on_volume_released()
+
+    def _on_volume_released(self):
         if self._playback_thread and self._playback_thread.isRunning():
             self._restart_playback_from(self._seek_frame)
 
@@ -972,7 +1000,7 @@ class MainWindow(QMainWindow):
         if not self._audio:
             self._seeking = False
             return
-        hop   = int(self._audio.sr / int(self._combo_fps.currentText()))
+        hop   = max(1, int(self._audio.sr / int(self._combo_fps.currentText())))
         total = int(len(self._audio.mono) / hop)
         self._seek_frame = int(self._seek_slider.value() / 1000 * total)
         self._seeking = False
@@ -987,7 +1015,9 @@ class MainWindow(QMainWindow):
     def _restart_playback_from(self, frame: int):
         if self._playback_thread:
             self._playback_thread.stop()
-            self._playback_thread.wait()
+            # Bounded wait: the GUI thread must never be able to hang here, whatever
+            # state the audio stream is in.
+            self._playback_thread.wait(_THREAD_STOP_TIMEOUT_MS)
         fps = int(self._combo_fps.currentText())
         self._fft = self._make_fft()
         self._playback_thread = AudioPlaybackThread(
@@ -1019,7 +1049,7 @@ class MainWindow(QMainWindow):
     def _stop_playback(self):
         if self._playback_thread:
             self._playback_thread.stop()
-            self._playback_thread.wait()
+            self._playback_thread.wait(_THREAD_STOP_TIMEOUT_MS)
         self._btn_play.setText("▶ Preview")
 
     def _on_playback_done(self):

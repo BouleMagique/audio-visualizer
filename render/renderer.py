@@ -559,10 +559,24 @@ class Renderer:
         del draw
 
         patch_1x = patch.resize((patch_r * 2, patch_r * 2), Image.LANCZOS)
-        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        overlay.paste(patch_1x, (cx - patch_r, cy - patch_r), patch_1x)
-        base = Image.fromarray(frame_tb, "RGB").convert("RGBA")
-        return np.array(Image.alpha_composite(base, overlay).convert("RGB"))
+
+        # Composite over the patch's bounding box only: the overlay is fully transparent
+        # everywhere else, so converting the whole 1920×1080 frame to RGBA and back was
+        # pure overhead. The patch still goes through a transparent RGBA overlay first —
+        # that squares its alpha, and the glow's look depends on it.
+        x0, y0 = cx - patch_r, cy - patch_r
+        side   = patch_r * 2
+        bx0, by0 = max(0, x0), max(0, y0)
+        bx1, by1 = min(W, x0 + side), min(H, y0 + side)
+        base = Image.fromarray(frame_tb, "RGB")
+        if bx0 >= bx1 or by0 >= by1:
+            return np.array(base)
+
+        overlay = Image.new("RGBA", (bx1 - bx0, by1 - by0), (0, 0, 0, 0))
+        overlay.paste(patch_1x, (x0 - bx0, y0 - by0), patch_1x)
+        crop = base.crop((bx0, by0, bx1, by1)).convert("RGBA")
+        base.paste(Image.alpha_composite(crop, overlay).convert("RGB"), (bx0, by0))
+        return np.array(base)
 
     def draw_selection_outline(self, layer: Layer) -> None:
         """Preview-only: draw a highlight box around the selected layer."""

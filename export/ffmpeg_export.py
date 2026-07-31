@@ -39,7 +39,7 @@ class FFmpegExporter:
         self.center_image_path = center_image_path
         self.progress_cb = progress_cb
 
-        self.hop_size = int(audio.sr / fps)
+        self.hop_size = max(1, int(audio.sr / fps))
         self.fft = FFTProcessor(
             sr=audio.sr,
             fft_size=FFT_SIZE,

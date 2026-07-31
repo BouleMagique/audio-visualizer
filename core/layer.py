@@ -22,7 +22,7 @@ from config.defaults import (
     TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     NUKE_KICK_THRESHOLD, NUKE_SPEED, NUKE_LIFE, NUKE_WIDTH, NUKE_FLASH, NUKE_BG,
     VOID_SPEED, VOID_PULL, VOID_RAYS, VOID_ARMS,
-    FLASH_INTENSITY, BG_PULSE_INTENSITY, VIZ_TYPES,
+    FLASH_INTENSITY, BG_PULSE_INTENSITY, VIZ_TYPES, DEFAULT_VIZ_TYPE,
 )
 
 MAX_VISUAL_LAYERS = 6
@@ -39,7 +39,7 @@ def _default_palette() -> list:
 @dataclass
 class Layer:
     """A single visual layer — an instance of a viz mode with its own transform."""
-    mode: int = 0                       # viz_type
+    mode: int = DEFAULT_VIZ_TYPE        # viz_type
     name: str = "Layer"
 
     # ── Composition / transform ──
@@ -133,7 +133,7 @@ class LayerManager:
         self._selected_id: int | None = None
 
     # ── Stack management ──
-    def add_layer(self, mode: int = 0) -> Layer | None:
+    def add_layer(self, mode: int = DEFAULT_VIZ_TYPE) -> Layer | None:
         if len(self.layers) >= MAX_VISUAL_LAYERS:
             return None
         layer = Layer(mode=mode)

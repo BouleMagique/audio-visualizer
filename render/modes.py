@@ -1,5 +1,9 @@
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
+
+# Blur radius for the frequency-mode gradient fill, as a fraction of one band's width.
+# Enough to dissolve the flat-shaded band edges without smearing the whole gradient.
+_FILL_BLUR_FRAC = 0.6
 
 
 def _catmull_rom_open(points: list, subdivisions: int = 6) -> list:
@@ -67,6 +71,106 @@ def _pal_color(t: float, palette: list) -> tuple:
     else:
         a, b, f = palette[3], palette[4], (t - 0.75) * 4.0
     return tuple(int((a[i] + (b[i] - a[i]) * f) * 255) for i in range(3))
+
+
+def _pal_colors(ts: np.ndarray, palette: list) -> np.ndarray:
+    """Vectorised _pal_color: (n,) of t in 0..1 → (n, 3) uint8."""
+    stops = np.asarray(palette, dtype=np.float32)[:, :3]      # 5 × 3
+    t = np.clip(np.asarray(ts, dtype=np.float32), 0.0, 1.0) * 4.0
+    i = np.minimum(t.astype(np.intp), 3)
+    f = (t - i)[:, None]
+    return ((stops[i] + (stops[i + 1] - stops[i]) * f) * 255).astype(np.uint8)
+
+
+def _bbox(pts: list, W: int, H: int) -> tuple:
+    """Integer bounding box of pts, clamped to the frame: (x0, y0, x1, y1)."""
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    x0 = max(0, int(min(xs)) - 1)
+    y0 = max(0, int(min(ys)) - 1)
+    x1 = max(x0 + 1, min(W, int(max(xs)) + 2))
+    y1 = max(y0 + 1, min(H, int(max(ys)) + 2))
+    return x0, y0, x1, y1
+
+
+def _blur_scale(blur_px: float, box: tuple) -> int:
+    """Resolution divisor for building a gradient that will be blurred by blur_px.
+
+    A gradient carries no fine detail, so it is cheaper to draw it small and let one
+    bilinear upscale do most of the softening than to rasterise and blur at full size.
+    """
+    x0, y0, x1, y1 = box
+    scale = max(1, int(blur_px))
+    while scale > 1 and ((x1 - x0) // scale < 8 or (y1 - y0) // scale < 8):
+        scale -= 1
+    return scale
+
+
+def _expand_radial(pts: list, cx: float, cy: float, px: float) -> list:
+    """Push points outward from (cx, cy) by px, so a blur has colour to pull from."""
+    p = np.asarray(pts, dtype=np.float64)
+    d = p - (cx, cy)
+    r = np.hypot(d[:, 0], d[:, 1])
+    k = np.where(r > 1e-6, (r + px) / np.maximum(r, 1e-6), 1.0)
+    out = (cx, cy) + d * k[:, None]
+    return [(float(x), float(y)) for x, y in out]
+
+
+def _finish_gradient(small: Image.Image, box: tuple, scale: int, blur_px: float,
+                     mask_pts: list, alpha: int, hole: tuple | None = None) -> Image.Image:
+    """Upscale a small flat-shaded gradient, then cut it to the exact fill silhouette.
+
+    Softening comes from the bilinear upscale plus a light Gaussian at the small size, so
+    the flat band edges dissolve. The shape is applied afterwards at full resolution, which
+    keeps the fill's outline crisp. `small` must cover more than mask_pts, otherwise the
+    blur pulls its own transparent surround inward and leaves a dark rim.
+    """
+    x0, y0, x1, y1 = box
+    if blur_px >= 0.5:
+        small = small.filter(ImageFilter.GaussianBlur(max(0.5, blur_px / scale)))
+    layer = small.resize((x1 - x0, y1 - y0), Image.BILINEAR) if scale > 1 else small
+
+    mask = Image.new("L", layer.size, 0)
+    md   = ImageDraw.Draw(mask)
+    md.polygon([(x - x0, y - y0) for x, y in mask_pts], fill=alpha)
+    if hole is not None:
+        hx, hy, hr = hole
+        md.ellipse([hx - hr - x0, hy - hr - y0, hx + hr - x0, hy + hr - y0], fill=0)
+    del md
+    layer.putalpha(mask)
+    return layer
+
+
+def _wedge_fan(curve_pts: list, cx: float, cy: float, box: tuple, scale: int,
+               n_segs: int, palette: list, freq_of) -> Image.Image:
+    """Opaque fan of wedges from (cx, cy) out to curve_pts, coloured along the curve.
+
+    Drawn at 1/scale resolution — the result is a gradient that gets blurred and upscaled,
+    so rasterising it at full size would only burn time.
+    """
+    x0, y0, x1, y1 = box
+    layer = Image.new("RGBA", (max(1, (x1 - x0) // scale), max(1, (y1 - y0) // scale)),
+                      (0, 0, 0, 0))
+    draw  = ImageDraw.Draw(layer)
+    seg_size = max(1, len(curve_pts) // max(n_segs, 1))
+    apex = ((cx - x0) / scale, (cy - y0) / scale)
+    for seg_i in range(n_segs):
+        col   = _pal_color(float(np.clip(freq_of(seg_i, n_segs), 0.0, 1.0)), palette)
+        start = seg_i * seg_size
+        end   = min(start + seg_size + 1, len(curve_pts))
+        pts   = [apex] + [((x - x0) / scale, (y - y0) / scale)
+                          for x, y in curve_pts[start:end]]
+        if len(pts) >= 3:
+            draw.polygon(pts, fill=(*col, 255))
+    # Close the ring: last control point back round to the first
+    draw.polygon(
+        [apex,
+         ((curve_pts[-1][0] - x0) / scale, (curve_pts[-1][1] - y0) / scale),
+         ((curve_pts[0][0] - x0) / scale, (curve_pts[0][1] - y0) / scale)],
+        fill=(*_pal_color(float(np.clip(freq_of(0, n_segs), 0.0, 1.0)), palette), 255),
+    )
+    del draw
+    return layer
 
 
 class HaloSineMode:
@@ -158,16 +262,37 @@ class HaloSineMode:
         # Interior fill (drawn first, under glow strokes)
         if fill_opacity > 0.0:
             fill_alpha = int(np.clip(fill_opacity, 0.0, 1.0) * 255)
-            fill_draw = ImageDraw.Draw(overlay)
-            fill_draw.polygon(curve_pts, fill=(*base_col, fill_alpha))
             # Punch out center so the GLSL-rendered center image shows through.
             # Use r_glsl_px (= r_base * H/2) regardless of the spline scaling factor.
             r_inner = r_glsl_px
-            fill_draw.ellipse(
-                [cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner],
-                fill=(0, 0, 0, 0),
-            )
-            del fill_draw
+            if pal_mode == 0:
+                fill_draw = ImageDraw.Draw(overlay)
+                fill_draw.polygon(curve_pts, fill=(*base_col, fill_alpha))
+                fill_draw.ellipse(
+                    [cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner],
+                    fill=(0, 0, 0, 0),
+                )
+                del fill_draw
+            else:
+                # Frequency mode: the fill follows the same angular gradient as the
+                # strokes, as a fan of wedges from the centre. The wedges are flat-shaded,
+                # so their edges would read as radial bands — the layer is drawn opaque and
+                # oversized, blurred, then cut to the real silhouette.
+                band_px = 2.0 * np.pi * max(r_base_px, 1.0) / max(n_points, 1)
+                blur_px = max(1.0, band_px * _FILL_BLUR_FRAC)
+                grown   = _expand_radial(curve_pts, cx, cy, blur_px + 2.0)
+                box     = _bbox(grown + [(cx, cy)], W, H)
+                scale   = _blur_scale(blur_px, box)
+                fill_img = _wedge_fan(
+                    grown, cx, cy, box, scale, n_points, palette,
+                    lambda seg_i, n: 1.0 - abs(2.0 * seg_i / max(n - 1, 1) - 1.0),
+                )
+                fill_img = _finish_gradient(fill_img, box, scale, blur_px,
+                                            curve_pts, fill_alpha,
+                                            hole=(cx, cy, r_inner))
+                # Straight paste, no mask: the overlay is still empty here, so this copies
+                # the RGBA verbatim instead of squaring the alpha.
+                overlay.paste(fill_img, (box[0], box[1]))
 
         # Glow passes: outermost (widest, dimmest) → core (narrowest, brightest)
         if pal_mode == 0:
@@ -217,9 +342,11 @@ class HaloSineMode:
                 draw.line([curve_pts[-1], curve_pts[0]], fill=(r, g, b, alpha), width=width)
                 del draw
 
-        base_img   = Image.fromarray(frame_rgb, "RGB").convert("RGBA")
-        composited = Image.alpha_composite(base_img, overlay)
-        return np.array(composited.convert("RGB"))
+        # Paste rather than alpha_composite: same result, without converting the whole
+        # 1920×1080 frame to RGBA and back on every frame.
+        base_img = Image.fromarray(frame_rgb, "RGB")
+        base_img.paste(overlay, (0, 0), overlay)
+        return np.array(base_img)
 
 
 class FlatSineMode:
@@ -287,9 +414,27 @@ class FlatSineMode:
         # Fill between curves
         if fill_opacity > 0.0:
             fill_alpha = int(np.clip(fill_opacity, 0.0, 1.0) * 255)
-            draw = ImageDraw.Draw(overlay)
-            draw.polygon(top_curve + bottom_curve[::-1], fill=(*base_col, fill_alpha))
-            del draw
+            if pal_mode == 0:
+                draw = ImageDraw.Draw(overlay)
+                draw.polygon(top_curve + bottom_curve[::-1], fill=(*base_col, fill_alpha))
+                del draw
+            else:
+                # Frequency mode: same left-to-right gradient as the strokes. It only varies
+                # with x, so it is built exactly — one palette lookup per column, broadcast
+                # down the rows. No flat bands to blur away, and cheaper than rasterising
+                # and blurring slabs.
+                x0, y0, x1, y1 = _bbox(top_curve + bottom_curve, W, H)
+                cols = _pal_colors(np.arange(x0, x1) / max(W - 1, 1), palette)
+                rgb  = np.broadcast_to(cols[None, :, :], (y1 - y0, x1 - x0, 3))
+                fill_img = Image.fromarray(np.ascontiguousarray(rgb), "RGB")
+
+                mask = Image.new("L", fill_img.size, 0)
+                md   = ImageDraw.Draw(mask)
+                md.polygon([(x - x0, y - y0)
+                            for x, y in top_curve + bottom_curve[::-1]], fill=fill_alpha)
+                del md
+                fill_img.putalpha(mask)
+                overlay.paste(fill_img, (x0, y0))
 
         # Glow passes
         n_segs   = n_points
@@ -325,5 +470,6 @@ class FlatSineMode:
                 draw.line(bottom_curve, fill=(r, g, b, alpha), width=width)
                 del draw
 
-        base_img   = Image.fromarray(frame_rgb, "RGB").convert("RGBA")
-        return np.array(Image.alpha_composite(base_img, overlay).convert("RGB"))
+        base_img = Image.fromarray(frame_rgb, "RGB")
+        base_img.paste(overlay, (0, 0), overlay)
+        return np.array(base_img)

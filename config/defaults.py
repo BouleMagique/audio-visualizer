@@ -69,6 +69,21 @@ VIZ_TYPES = {
     "Void Pull": 11,
 }
 
+# Modes proposés dans le sélecteur, dans l'ordre d'affichage.
+# Les modes absents de cette liste restent implémentés (VIZ_TYPES, renderer)
+# mais ne sont plus sélectionnables depuis l'UI.
+VIZ_TYPES_VISIBLE = (
+    "Halo Sine",
+    "Halo",
+    "Radial",
+    "Linéaire",
+    "Sine Plat",
+    "Miroir",
+    "Tunnel Arcade",
+)
+
+DEFAULT_VIZ_TYPE = VIZ_TYPES[VIZ_TYPES_VISIBLE[0]]
+
 # Halo Sine mode defaults
 HALO_SINE_R_BASE          = 0.35   # base radius as fraction of H
 HALO_SINE_AMPLITUDE       = 0.18   # max radial displacement as fraction of H
