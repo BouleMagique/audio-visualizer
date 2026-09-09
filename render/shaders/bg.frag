@@ -1,7 +1,8 @@
 #version 330 core
 
-in vec2 v_uv;
+in vec2 v_uv0;
 out vec4 fragColor;
+#define v_uv v_uv0
 
 uniform sampler2D u_tex;
 uniform int   u_has_image;

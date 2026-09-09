@@ -1,7 +1,10 @@
 #version 330 core
 
-in vec2 v_uv;
+in vec2 v_uv0;
 out vec4 fragColor;
+
+uniform int   u_symmetry;   // kaleidoscope sectors (1 = off), all modes
+uniform float u_hue;        // global hue shift 0-1 (post rotation, all modes)
 
 uniform int   u_num_bars;
 uniform float u_bars[256];
@@ -52,6 +55,37 @@ uniform float u_void_speed;       // mode 11: constant rotation speed
 uniform float u_void_pull;        // mode 11: contraction strength on kick/bass
 uniform float u_void_rays;        // mode 11: high-frequency ray intensity
 uniform int   u_void_arms;        // mode 11: spiral arm count
+uniform float u_psy_speed;        // modes 12-15: global animation speed (proto `spd`)
+uniform float u_psy_sat;          // modes 12-15: global saturation post (proto `sat`)
+uniform float u_myc_growth;       // mode 12: growth intensity
+uniform float u_myc_density;      // mode 12: filament density
+uniform float u_myc_warp;         // mode 12: domain-warp strength
+uniform float u_myc_branch;       // mode 12: filament thickness
+uniform float u_myc_spore;        // mode 12: spore amount on kick
+uniform float u_jul_zoom;         // mode 13: base zoom
+uniform float u_jul_breathe;      // mode 13: zoom breathing speed
+uniform float u_jul_glow;         // mode 13: edge halo intensity
+uniform float u_jul_rotate;       // mode 13: rotation speed
+uniform float u_jul_morph;        // mode 13: constant-c morph amplitude
+uniform int   u_jul_invert;       // mode 13: invert palette (0/1)
+uniform float u_eye_pupil;        // mode 14: resting pupil radius
+uniform float u_eye_iris;         // mode 14: iris radius
+uniform float u_eye_crypts;       // mode 14: crypt (radial fibre) density
+uniform float u_eye_undul;        // mode 14: crypt undulation amplitude
+uniform float u_eye_warp;         // mode 14: bass domain-warp strength
+uniform float u_eye_slit;         // mode 14: pupil shape (0 round → 1 slit)
+uniform float u_eye_dilate;       // mode 14: pupil dilation on kick
+uniform vec2  u_eye_gaze;         // mode 14: gaze position (CPU saccade)
+uniform float u_eye_blink_amt;    // mode 14: blink amount 0..1 (CPU)
+uniform int   u_eye_fx_veins;     // mode 14: sclera FX toggles
+uniform int   u_eye_fx_noise;
+uniform int   u_eye_fx_eyes;
+uniform int   u_eye_fx_holo;
+uniform float u_swp_scale;        // mode 15: pattern scale
+uniform float u_swp_mutate;       // mode 15: mutation speed
+uniform float u_swp_turing;       // mode 15: Turing threshold
+uniform float u_swp_glow;         // mode 15: contour network glow
+uniform float u_swp_flow;         // mode 15: global flow speed
 uniform int   u_tunnel_sides;     // polygon sides (4 / 6 / 8 / 12)
 uniform int   u_tunnel_rings;     // ring-line count
 uniform float u_tunnel_speed;     // base advance speed
@@ -66,6 +100,31 @@ vec3 hsv2rgb(vec3 c) {
     vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
     vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+// ── Kaleidoscope fold (global symmetry) ───────────────────────────
+// Folds a 0..1 uv into `sym` mirror sectors around the centre. Aspect-corrected
+// so sectors stay circular. sym < 2 → passthrough.
+vec2 kaleido(vec2 uv, int sym) {
+    if (sym < 2) return uv;
+    vec2 c = (uv - 0.5) * vec2(u_aspect, 1.0);
+    float r = length(c);
+    float a = atan(c.y, c.x);
+    float seg = 6.28318530718 / float(sym);
+    a = mod(a, seg);
+    a = abs(a - seg * 0.5);
+    c = vec2(cos(a), sin(a)) * r;
+    return c / vec2(u_aspect, 1.0) + 0.5;
+}
+
+// Hue rotation around the grey axis (Rodrigues) — for RGB-authored modes that
+// have no explicit HSV hue term (e.g. Mycelium). h in [0,1] = full turn.
+vec3 hueShiftRGB(vec3 col, float h) {
+    if (h == 0.0) return col;
+    const vec3 k = vec3(0.57735026919);
+    float c = cos(h * 6.28318530718);
+    float s = sin(h * 6.28318530718);
+    return col * c + cross(k, col) * s + k * dot(k, col) * (1.0 - c);
 }
 
 // ── Value noise (smooth, organic) ─────────────────────────────────
@@ -84,6 +143,33 @@ float vnoise(vec2 p) {
     float c = hash21(i + vec2(0.0, 1.0));
     float d = hash21(i + vec2(1.0, 1.0));
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// ── Psytrance modes (12-15): signed gradient noise + fbm + sat post ──
+// Ported verbatim from psytrance_visualizer_enhanced.html (proto hash2/noise/fbm).
+// Kept separate from vnoise() above: these modes were authored against this exact
+// signed-noise fbm and its look depends on it.
+vec2 phash2(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5) * 2.0 - 1.0;
+}
+float pnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(dot(phash2(i),              f),
+                   dot(phash2(i + vec2(1, 0)), f - vec2(1, 0)), f.x),
+               mix(dot(phash2(i + vec2(0, 1)), f - vec2(0, 1)),
+                   dot(phash2(i + vec2(1, 1)), f - vec2(1, 1)), f.x), f.y);
+}
+float pfbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 6; i++) { v += a * pnoise(p); p = p * 2.0 + vec2(3.1, 1.7); a *= 0.5; }
+    return v;
+}
+// Global saturation post (proto postProcess): desaturate toward luminance.
+vec3 psySat(vec3 c, float s) {
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    return mix(vec3(l), c, s);
 }
 
 // ── Tunnel Arcade helpers ─────────────────────────────────────────
@@ -159,6 +245,7 @@ int bar_index_x(float uv_x) {
 
 // ────────────────────────────────────────────────────────────────
 void main() {
+    vec2 v_uv = kaleido(v_uv0, u_symmetry);
     vec2 bg_uv = v_uv;
     if (u_bg_pulse_enabled == 1 && u_has_bg == 1) {
         float zoom = 1.0 + u_pulse * u_pulse_intensity * u_bg_pulse_intensity * 0.10;
@@ -580,7 +667,204 @@ void main() {
 
         // Center flares during the gravity contraction (kick feedback)
         color += pull * smoothstep(0.55, 0.0, r11) * u_pal2 * 0.5 * vmask;
+
+    // ── Mycelium — organic filament network, domain-warped fbm iso-contours ──
+    } else if (u_viz_type == 12) {
+        vec2  uv  = (v_uv - 0.5) * vec2(u_aspect, 1.0) * 3.0;
+        float r   = length(uv);
+        float ang = atan(uv.y, uv.x);
+        float sp  = u_time * u_psy_speed;
+
+        // Domain warp: turns uniform noise into tortuous organic filaments.
+        vec2 warp = vec2(pfbm(uv * 1.2 + sp * 0.2), pfbm(uv * 1.2 - sp * 0.15 + 5.0));
+        vec2 puv  = uv + warp * (u_myc_warp + u_bass * 0.5)
+                  + vec2(cos(ang * 6.0 + u_time), sin(ang * 6.0)) * 0.1;
+
+        float fil    = pfbm(puv * u_myc_density + sp * 0.1);
+        float lines  = abs(fract(fil * 6.0 + u_kick_accum * 0.5) - 0.5);
+        float branch = 1.0 - smoothstep(0.0, u_myc_branch + u_bass * 0.04, lines);
+        float grow   = smoothstep(2.5, 0.0, r) * (0.4 + u_myc_growth * 0.4 + u_kick_accum * 0.4);
+
+        vec3 earth = mix(vec3(0.05, 0.12, 0.04), vec3(0.4, 0.5, 0.15), fil * 0.5 + 0.5);
+        earth      = mix(earth, vec3(0.7, 0.6, 0.35), branch * u_high);
+        vec3 col   = earth * branch * grow * (1.0 + u_kick * 1.5);
+
+        // Spores: green points that pop only on kick.
+        float spore = step(0.97, pnoise(uv * 8.0 + u_time)) * u_kick * u_myc_spore;
+        col += vec3(0.6, 0.9, 0.4) * spore;
+
+        col += vec3(0.02, 0.04, 0.02) * (pfbm(uv * 0.5 + u_time * 0.05) * 0.5 + 0.5);
+        col *= 1.0 - smoothstep(1.5, 3.0, r);   // vignette
+        col = hueShiftRGB(col, u_hue);      // Teinte (Mycelium is RGB-authored)
+        color = pow(max(psySat(col, u_psy_sat), vec3(0.0)), vec3(0.7));
+
+    // ── Julia Morph — morphing Julia fractal, optional kaleidoscope mandala ──
+    } else if (u_viz_type == 13) {
+        vec2 uv = (v_uv - 0.5) * vec2(u_aspect, 1.0);
+
+        float zoom = u_jul_zoom + sin(u_time * u_psy_speed * u_jul_breathe) * 0.5 - u_kick_accum * 0.3;
+        float rot  = u_time * u_psy_speed * u_jul_rotate + u_bass * 0.3;
+        float cs   = cos(rot), sn = sin(rot);
+        uv = mat2(cs, -sn, sn, cs) * uv * zoom;
+
+        // Animated constant c: this is what makes the fractal morph continuously.
+        vec2 c = vec2(-0.75 + sin(u_time * u_psy_speed * 0.13) * u_jul_morph + u_bass * 0.05,
+                       0.12 + cos(u_time * u_psy_speed * 0.11) * u_jul_morph + u_mid * 0.04);
+
+        vec2 z = uv; float iter = 0.0; const float MAXI = 64.0;
+        for (float i = 0.0; i < 64.0; i++) {
+            z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+            if (dot(z, z) > 4.0) { iter = i; break; }
+            iter = i;
+        }
+        float m = iter / MAXI;
+
+        float hue    = fract(m * 2.0 + u_time * 0.05 + u_bass * 0.2 + u_hue);
+        float bright = (u_jul_invert >= 1) ? pow(m, 1.5) : pow(1.0 - m, 1.5);
+        vec3  col    = hsv2rgb(vec3(hue, 0.7 + u_high * 0.3, bright));
+
+        float edge = smoothstep(0.4, 0.5, m) * smoothstep(0.6, 0.5, m);
+        col += hsv2rgb(vec3(hue + 0.3, 1.0, 1.0)) * edge * u_high * u_jul_glow;
+
+        col *= 1.0 + u_kick * 1.5;   // flash on kick
+        color = pow(max(psySat(col, u_psy_sat), vec3(0.0)), vec3(0.6));
+
+    // ── Alien Eye v2 — realistic almond eye, saccade scan, undulating crypts ──
+    } else if (u_viz_type == 14) {
+        vec2  uv = (v_uv - 0.5) * vec2(u_aspect, 1.0) * 2.0;
+        float et = u_time * u_psy_speed;
+
+        // 1. ALMOND silhouette: two parabolas → the eye exists where |y| < curve(x).
+        float ax = 1.15, h = 0.55;
+        float xn = uv.x / ax;
+        float lidCurve = h * (1.0 - xn * xn);
+        // Upper eyelid rolls down the almond curve as the eye blinks (0 open, 1 shut).
+        float blinkAmt = clamp(u_eye_blink_amt, 0.0, 1.0);
+        float lidY  = mix(lidCurve, -lidCurve * 0.85, blinkAmt);
+        float upper = lidY;
+        float lower = -lidCurve;
+        float inEye = smoothstep(0.0, 0.02, upper - uv.y)
+                    * smoothstep(0.0, 0.02, uv.y - lower)
+                    * step(abs(xn), 1.0);
+
+        // 2. SCLERA: off-white, shaded toward the corners (pink commissures).
+        vec3 sclera = vec3(0.92, 0.90, 0.88);
+        float corner = smoothstep(0.4, 1.0, abs(xn));
+        sclera = mix(sclera, vec3(0.85, 0.55, 0.55), corner * 0.35);
+        sclera *= 0.8 + 0.2 * smoothstep(0.6, 0.0, length(uv - vec2(0.0, 0.1)));
+
+        // 2b. SCLERA FX (toggleable; masked to the sclera by irisMask below).
+        if (u_eye_fx_veins == 1) {
+            float vn = pfbm(uv * 3.5 + et * 0.1);
+            float lines = 1.0 - smoothstep(0.0, 0.05, abs(fract(vn * 5.0) - 0.5));
+            vec3 veinCol = hsv2rgb(vec3(fract(0.55 + u_hue + et * 0.05), 0.9, 1.0));
+            sclera += veinCol * lines * (0.15 + u_bass * 0.8) * smoothstep(0.15, 0.6, abs(xn));
+        }
+        if (u_eye_fx_noise == 1) {
+            float n = pfbm(uv * 2.5 + vec2(et * 0.15, -et * 0.1));
+            n = pfbm(uv * 2.5 + n * 1.5);
+            vec3 nCol = hsv2rgb(vec3(fract(n * 0.4 + u_hue + et * 0.03), 0.6, 1.0));
+            sclera = mix(sclera, sclera * 0.6 + nCol * 0.5, 0.35 * (0.4 + u_mid * 0.6));
+        }
+        if (u_eye_fx_eyes == 1) {
+            vec2 gg = fract(uv * 4.0) - 0.5;
+            float rr2 = length(gg);
+            float ring = smoothstep(0.32, 0.28, rr2) * smoothstep(0.18, 0.22, rr2);
+            float pup2 = smoothstep(0.10, 0.06, rr2);
+            float motif = ring + pup2;
+            motif *= 0.5 + 0.5 * sin(et * 3.0 + dot(floor(uv * 4.0), vec2(1.7, 2.3)));
+            vec3 mCol = hsv2rgb(vec3(fract(0.75 + u_hue), 0.8, 1.0));
+            sclera += mCol * motif * (0.2 + u_high * 0.7);
+        }
+        if (u_eye_fx_holo == 1) {
+            float cloud = pfbm(uv * 1.8 + et * 0.08);
+            float ihue = fract(cloud + uv.x * 0.3 + uv.y * 0.2 + et * 0.06 + u_hue);
+            vec3 holo = hsv2rgb(vec3(ihue, 0.7, 1.0));
+            float pulse = 0.3 + 0.7 * (0.5 + 0.5 * sin(et * 2.0)) + u_kick * 0.5;
+            sclera = mix(sclera, sclera * 0.5 + holo * 0.7, 0.4 * cloud * pulse);
+        }
+
+        // Gaze (CPU saccade) offsets the iris within the almond.
+        vec2 gazePos = u_eye_gaze * vec2(0.5, 0.32);
+        vec2 e = uv - gazePos;
+        float rd = length(e);
+
+        // 3. IRIS: bass domain-warp on the crypt coordinates + undulating radial fibres.
+        float irisR = u_eye_iris + u_bass * 0.02;
+        vec2 warpUV = e + vec2(pfbm(e * 3.0 + et * 0.3), pfbm(e * 3.0 - et * 0.25 + 5.0))
+                        * (u_eye_warp * (0.15 * u_bass + 0.05));
+        float rdW  = length(warpUV);
+        float angW = atan(warpUV.y, warpUV.x);
+        float radial = pfbm(vec2(angW * u_eye_crypts * 0.15, rdW * 6.0 - et * 0.6));
+        float crypt  = abs(fract(radial * 4.0 + angW / 6.2831 * u_eye_crypts
+                       + sin(rdW * 10.0 - et * 2.0) * u_eye_undul * 0.5) - 0.5);
+        float cryptLines = 1.0 - smoothstep(0.0, 0.12, crypt);
+        float hue = fract(0.58 + pfbm(e * 2.0) * 0.08 + u_hue);
+        vec3 irisBase   = hsv2rgb(vec3(hue, 0.75, 0.5));
+        vec3 irisBright = hsv2rgb(vec3(hue + 0.05, 0.6, 1.0));
+        vec3 iris = mix(irisBase, irisBright, cryptLines * (0.5 + u_high * 0.6));
+        iris *= 0.5 + 0.5 * smoothstep(u_eye_pupil, irisR * 0.8, rd);   // dark toward centre
+        float limbus = smoothstep(irisR, irisR - 0.05, rd);            // dark limbal ring
+        iris *= mix(0.3, 1.0, limbus);
+        iris *= 1.0 + u_kick * 1.2;                                     // glint on kick
+        float irisMask = smoothstep(irisR, irisR - 0.01, rd);
+
+        // 4. PUPIL (round ↔ vertical slit via u_eye_slit), dilates on kick/bass.
+        float pupilR = u_eye_pupil + u_kick_accum * 0.08 * u_eye_dilate + u_bass * 0.02;
+        float slitW = pupilR * 0.35, slitH = pupilR * 2.2;
+        float slitD = length(vec2(e.x / max(slitW, 1e-3), e.y / max(slitH, 1e-3))) * pupilR;
+        float pupilD = mix(rd, slitD, u_eye_slit);
+        float pupilMask = smoothstep(pupilR, pupilR - 0.008, pupilD);
+        vec3 pupilCol = vec3(0.02, 0.0, 0.02);
+
+        vec3 eyeCol = sclera;
+        eyeCol = mix(eyeCol, iris, irisMask);
+        eyeCol = mix(eyeCol, pupilCol, pupilMask);
+
+        // 5. CATCHLIGHT (specular reflections) — gives the eye life.
+        vec2 hl = gazePos + vec2(-0.12, 0.14);
+        eyeCol += vec3(1.0) * smoothstep(0.06, 0.0, length(uv - hl)) * 0.9;
+        eyeCol += vec3(1.0) * smoothstep(0.03, 0.0, length(uv - gazePos - vec2(0.08, -0.06))) * 0.4;
+
+        vec3 col = eyeCol * inEye;
+        float rim = smoothstep(0.0, 0.03, upper - uv.y) * smoothstep(0.03, 0.0, upper - uv.y)
+                  + smoothstep(0.0, 0.03, uv.y - lower) * smoothstep(0.03, 0.0, uv.y - lower);
+        col *= 1.0 - rim * 0.6;   // dark eyelash line
+        col = psySat(col, u_psy_sat);
+        color = pow(max(col, vec3(0.0)), vec3(0.72));
+
+    // ── Swamp — reaction-diffusion / Turing patterns, recursive domain warp ──
+    } else if (u_viz_type == 15) {
+        vec2  uv = (v_uv - 0.5) * vec2(u_aspect, 1.0) * u_swp_scale;
+        float sp = u_time * u_psy_speed;
+
+        // Recursive domain warp (imitates reaction-diffusion): uv→q→rr→pattern.
+        vec2 q  = vec2(pfbm(uv + sp * u_swp_flow),
+                       pfbm(uv + vec2(5.2, 1.3) - sp * u_swp_flow * 0.8));
+        vec2 rr = vec2(pfbm(uv + q * 2.0 + vec2(1.7, 9.2) + u_time * 0.1 * u_swp_mutate),
+                       pfbm(uv + q * 2.0 + vec2(8.3, 2.8)));
+        float pattern = pfbm(uv + rr * (2.0 + u_bass * 1.5));
+
+        float turing  = smoothstep(u_swp_turing - 0.05, u_swp_turing, pattern)
+                      * smoothstep(u_swp_turing + 0.3, u_swp_turing + 0.25, pattern);
+        float turing2 = smoothstep(0.5, 0.52, fract(pattern * 3.0 + u_kick_accum));
+
+        float hue   = 0.28 + pattern * 0.15 + u_bass * 0.05 + u_hue;
+        vec3  base  = hsv2rgb(vec3(hue, 0.6 + u_mid * 0.3, 0.3 + pattern * 0.5));
+        vec3  spots = hsv2rgb(vec3(hue - 0.1, 0.8, 0.7)) * turing;
+        vec3  col   = mix(base, spots, turing) * (0.5 + u_bass * 0.5);
+
+        col += hsv2rgb(vec3(hue + 0.2, 0.9, 1.0)) * turing2 * (0.3 + u_high * 0.5 + u_kick * 0.6) * u_swp_glow;
+
+        col *= 1.0 + u_kick * 0.9;   // global pulse on kick
+        float rvig = length(uv) * 0.25;
+        col *= 1.0 - smoothstep(0.7, 1.4, rvig);   // vignette
+        color = pow(max(psySat(col, u_psy_sat), vec3(0.0)), vec3(0.7));
     }
+
+    // Global hue shift (all modes). Psy modes (12-15) already fold their hue into
+    // their palettes internally, so only rotate the others here to avoid doubling.
+    if (u_viz_type < 12) color = hueShiftRGB(color, u_hue);
 
     if (u_flash_enabled == 1) {
         float f = clamp(u_pulse * u_pulse_intensity * u_flash_intensity, 0.0, 0.92);

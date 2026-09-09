@@ -8,6 +8,7 @@ Layer objects are pure configuration + identity. The per-layer mutable render
 state (audio history, PIL mode instances, FBO) lives renderer-side, keyed by
 Layer.id — see render/renderer.py:LayerState.
 """
+import math
 from dataclasses import dataclass, field
 from itertools import count
 
@@ -22,6 +23,15 @@ from config.defaults import (
     TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     NUKE_KICK_THRESHOLD, NUKE_SPEED, NUKE_LIFE, NUKE_WIDTH, NUKE_FLASH, NUKE_BG,
     VOID_SPEED, VOID_PULL, VOID_RAYS, VOID_ARMS,
+    SYMMETRY, BAND_GAIN_LOW, BAND_GAIN_MID, BAND_GAIN_HIGH, HUE,
+    AUTO_SPEED, AUTO_AMOUNT,
+    PSY_SPEED, PSY_SAT,
+    MYC_GROWTH, MYC_DENSITY, MYC_WARP, MYC_BRANCH, MYC_SPORE,
+    JUL_ZOOM, JUL_BREATHE, JUL_GLOW, JUL_ROTATE, JUL_MORPH, JUL_INVERT,
+    EYE_PUPIL, EYE_IRIS, EYE_CRYPTS, EYE_UNDUL, EYE_WARP, EYE_SLIT,
+    EYE_SCAN_SPEED, EYE_SCAN_AMP, EYE_DILATE, EYE_BLINK,
+    EYE_FX_VEINS, EYE_FX_NOISE, EYE_FX_EYES, EYE_FX_HOLO,
+    SWP_SCALE, SWP_MUTATE, SWP_TURING, SWP_GLOW, SWP_FLOW,
     FLASH_INTENSITY, BG_PULSE_INTENSITY, VIZ_TYPES, DEFAULT_VIZ_TYPE,
 )
 
@@ -34,6 +44,31 @@ _id_counter = count(1)
 
 def _default_palette() -> list:
     return [list(c) for c in list(PALETTES.values())[0]]
+
+
+def apply_auto_lfo(layer, t: float) -> None:
+    """Evaluate the layer's auto-LFO sweeps at time t and write them onto its fields.
+
+    Called once per frame by the renderer, so the sweep drives BOTH the live preview
+    and the frame-by-frame export identically (the UI is not involved). Each swept
+    field oscillates around the MIDPOINT of its range, so amount = 1 covers the full
+    min↔max independent of the field's own range. `pause` soft-clips the sine toward a
+    square, dwelling at the extremes (0 = clean continuous sweep).
+    """
+    if not layer.auto:
+        return
+    speed, amount, pause = layer.auto_speed, layer.auto_amount, layer.auto_pause
+    for field_name, spec in layer.auto.items():
+        lo, hi, phase = spec
+        s = math.sin(t * speed * 2.0 + phase)
+        if pause > 0.001:
+            g = pause * 6.0
+            s = math.tanh(s * g) / math.tanh(g)
+        mid = (hi + lo) * 0.5
+        v = mid + s * (hi - lo) * 0.5 * amount
+        v = max(lo, min(hi, v))
+        cur = getattr(layer, field_name, None)
+        setattr(layer, field_name, int(round(v)) if isinstance(cur, int) else v)
 
 
 @dataclass
@@ -57,12 +92,23 @@ class Layer:
     pulse_intensity: float = PULSE_INTENSITY
     sensitivity: float = SENSITIVITY
     rotation: float = 0.0              # radians
+    hue: float = HUE                   # global hue shift 0-1, all modes
+    symmetry: int = SYMMETRY           # kaleidoscope sectors (1 = off), all modes
+    band_gain_low: float = BAND_GAIN_LOW    # effect-only gain on u_bass
+    band_gain_mid: float = BAND_GAIN_MID    # effect-only gain on u_mid
+    band_gain_high: float = BAND_GAIN_HIGH  # effect-only gain on u_high
+    # Auto-LFO: {field_name: [lo, hi, phase]} in field units, evaluated per frame
+    # by apply_auto_lfo() in the renderer — so it drives both preview AND export.
+    auto: dict = field(default_factory=dict)
+    auto_speed: float = AUTO_SPEED
+    auto_amount: float = AUTO_AMOUNT
+    auto_pause: float = 0.0
     pal_mode: int = 0                  # 0 = amplitude, 1 = fréquence
     mirror: bool = False
     flash: bool = False
     flash_intensity: float = FLASH_INTENSITY
     palette: list = field(default_factory=_default_palette)
-    palette_name: str = field(default_factory=lambda: list(PALETTES.keys())[0])
+    palette_name: str = "Défaut"   # built-in presets removed; "Défaut" + 2 custom
 
     # ── Halo Sine / Flat Sine ──
     halo_r_base: float = HALO_SINE_R_BASE
@@ -101,6 +147,48 @@ class Layer:
     void_pull: float = VOID_PULL
     void_rays: float = VOID_RAYS
     void_arms: int = VOID_ARMS
+
+    # ── Psytrance modes (12-15) — shared "psy global" params ──
+    psy_speed: float = PSY_SPEED
+    psy_sat: float = PSY_SAT
+
+    # ── Mycelium (mode 12) ──
+    myc_growth: float = MYC_GROWTH
+    myc_density: float = MYC_DENSITY
+    myc_warp: float = MYC_WARP
+    myc_branch: float = MYC_BRANCH
+    myc_spore: float = MYC_SPORE
+
+    # ── Julia Morph (mode 13) ──
+    jul_zoom: float = JUL_ZOOM
+    jul_breathe: float = JUL_BREATHE
+    jul_glow: float = JUL_GLOW
+    jul_rotate: float = JUL_ROTATE
+    jul_morph: float = JUL_MORPH
+    jul_invert: int = JUL_INVERT
+
+    # ── Alien Eye v2 (mode 14) ──
+    eye_pupil: float = EYE_PUPIL
+    eye_iris: float = EYE_IRIS
+    eye_crypts: int = EYE_CRYPTS
+    eye_undul: float = EYE_UNDUL
+    eye_warp: float = EYE_WARP
+    eye_slit: float = EYE_SLIT
+    eye_scan_speed: float = EYE_SCAN_SPEED
+    eye_scan_amp: float = EYE_SCAN_AMP
+    eye_dilate: float = EYE_DILATE
+    eye_blink: float = EYE_BLINK
+    eye_fx_veins: int = EYE_FX_VEINS
+    eye_fx_noise: int = EYE_FX_NOISE
+    eye_fx_eyes: int = EYE_FX_EYES
+    eye_fx_holo: int = EYE_FX_HOLO
+
+    # ── Swamp (mode 15) ──
+    swp_scale: float = SWP_SCALE
+    swp_mutate: float = SWP_MUTATE
+    swp_turing: float = SWP_TURING
+    swp_glow: float = SWP_GLOW
+    swp_flow: float = SWP_FLOW
 
     id: int = field(default_factory=lambda: next(_id_counter))
 

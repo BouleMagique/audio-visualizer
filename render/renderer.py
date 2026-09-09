@@ -1,3 +1,5 @@
+import math
+import random
 import moderngl
 import numpy as np
 from collections import deque
@@ -6,7 +8,7 @@ from PIL import Image, ImageDraw
 from config.defaults import (
     CIRCLE_RADIUS_RATIO, BAR_WIDTH, PALETTES, SENSITIVITY,
 )
-from core.layer import Layer, BGLayer, LayerManager, BLEND_ADDITIVE
+from core.layer import Layer, BGLayer, LayerManager, BLEND_ADDITIVE, apply_auto_lfo
 from render.modes import HaloSineMode, FlatSineMode
 
 
@@ -45,6 +47,20 @@ class LayerState:
         self.shock_avg: float = 0.0       # slow-tracking background pulse level
         self.shock_armed: bool = True     # hysteresis gate — one wave per kick
         self.shock_cooldown: int = 0
+
+        # Alien Eye v2 (mode 14): CPU saccade (gaze) + blink state machines.
+        self.eye_seeded = False
+        self.eye_last_t = 0.0
+        self.eye_gx = 0.0
+        self.eye_gy = 0.0
+        self.eye_tx = 0.0
+        self.eye_ty = 0.0
+        self.eye_next_saccade = 0.0
+        self.eye_blink_amt = 0.0
+        self.eye_blink_state = 0     # 0 idle, 1 closing, 2 opening
+        self.eye_blink_clock = 0.0
+        self.eye_next_blink = 0.0
+        self.eye_double_queued = False
 
         self.bass_smooth2 = np.zeros(_BASS_HIST_W, dtype=np.float32)
         self.bass_history  = np.zeros((_BASS_HIST_N, _BASS_HIST_W), dtype=np.float32)
@@ -249,6 +265,9 @@ class Renderer:
     # ── Single-layer viz render (into st.fbo, on black) ──────────
     def _render_layer(self, st: LayerState, layer: Layer,
                       bars: np.ndarray, pulse: float, time: float) -> None:
+        # Auto-LFO: sweep flagged fields for this frame (drives preview AND export).
+        apply_auto_lfo(layer, time)
+
         palette = layer.palette if layer.palette else _DEFAULT_PALETTE
         viz_type = layer.mode
 
@@ -258,6 +277,19 @@ class Renderer:
             lbars = np.interp(xs, np.arange(len(bars)), bars).astype(np.float32)
         else:
             lbars = bars
+
+        # Per-band effect gains: scale the low / mid / high thirds of the render &
+        # analysis bars — reaches EVERY mode (u_bars and the derived u_bass/mid/high
+        # + kick). Never touches the played-back audio (separate sounddevice path).
+        gl_, gm_, gh_ = layer.band_gain_low, layer.band_gain_mid, layer.band_gain_high
+        if gl_ != 1.0 or gm_ != 1.0 or gh_ != 1.0:
+            lbars = lbars.copy()
+            nb = len(lbars)
+            n_lo  = max(1, int(nb * 0.30))
+            n_mid = max(n_lo + 1, int(nb * 0.70))
+            lbars[:n_lo]      *= gl_
+            lbars[n_lo:n_mid] *= gm_
+            lbars[n_mid:]     *= gh_
 
         st.fbo.use()
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
@@ -295,6 +327,7 @@ class Renderer:
         self.prog["u_sensitivity"].value = float(layer.sensitivity)
         self.prog["u_viz_type"].value = int(viz_type)
         self.prog["u_rotation"].value = float(layer.rotation)
+        self.prog["u_symmetry"].value = int(layer.symmetry)
         self.prog["u_mirror"].value = int(layer.mirror)
         self.prog["u_pal_mode"].value = int(layer.pal_mode)
         self.prog["u_halo_r_base"].value = float(layer.halo_r_base)
@@ -313,6 +346,43 @@ class Renderer:
         self.prog["u_void_pull"].value = float(layer.void_pull)
         self.prog["u_void_rays"].value = float(layer.void_rays)
         self.prog["u_void_arms"].value = int(layer.void_arms)
+
+        # Psytrance modes (12-15) params
+        self.prog["u_psy_speed"].value = float(layer.psy_speed)
+        self.prog["u_psy_sat"].value = float(layer.psy_sat)
+        self.prog["u_hue"].value = float(layer.hue)
+        self.prog["u_myc_growth"].value = float(layer.myc_growth)
+        self.prog["u_myc_density"].value = float(layer.myc_density)
+        self.prog["u_myc_warp"].value = float(layer.myc_warp)
+        self.prog["u_myc_branch"].value = float(layer.myc_branch)
+        self.prog["u_myc_spore"].value = float(layer.myc_spore)
+        self.prog["u_jul_zoom"].value = float(layer.jul_zoom)
+        self.prog["u_jul_breathe"].value = float(layer.jul_breathe)
+        self.prog["u_jul_glow"].value = float(layer.jul_glow)
+        self.prog["u_jul_rotate"].value = float(layer.jul_rotate)
+        self.prog["u_jul_morph"].value = float(layer.jul_morph)
+        self.prog["u_jul_invert"].value = int(layer.jul_invert)
+        # Alien Eye v2: advance the CPU saccade + blink state (only for mode 14).
+        gx, gy, blink_amt = (self._update_eye(st, layer, time)
+                             if viz_type == 14 else (0.0, 0.0, 0.0))
+        self.prog["u_eye_pupil"].value = float(layer.eye_pupil)
+        self.prog["u_eye_iris"].value = float(layer.eye_iris)
+        self.prog["u_eye_crypts"].value = float(layer.eye_crypts)
+        self.prog["u_eye_undul"].value = float(layer.eye_undul)
+        self.prog["u_eye_warp"].value = float(layer.eye_warp)
+        self.prog["u_eye_slit"].value = float(layer.eye_slit)
+        self.prog["u_eye_dilate"].value = float(layer.eye_dilate)
+        self.prog["u_eye_gaze"].value = (float(gx), float(gy))
+        self.prog["u_eye_blink_amt"].value = float(blink_amt)
+        self.prog["u_eye_fx_veins"].value = int(layer.eye_fx_veins)
+        self.prog["u_eye_fx_noise"].value = int(layer.eye_fx_noise)
+        self.prog["u_eye_fx_eyes"].value = int(layer.eye_fx_eyes)
+        self.prog["u_eye_fx_holo"].value = int(layer.eye_fx_holo)
+        self.prog["u_swp_scale"].value = float(layer.swp_scale)
+        self.prog["u_swp_mutate"].value = float(layer.swp_mutate)
+        self.prog["u_swp_turing"].value = float(layer.swp_turing)
+        self.prog["u_swp_glow"].value = float(layer.swp_glow)
+        self.prog["u_swp_flow"].value = float(layer.swp_flow)
 
         # Lissajous / Halo animation uniforms
         bar_slice = lbars[:n]
@@ -354,6 +424,71 @@ class Renderer:
             self._post_halo_sine(st, layer, lbars, pulse, palette)
         elif viz_type == 9:
             self._post_flat_sine(st, layer, lbars, palette)
+
+    def _update_eye(self, st: LayerState, layer: Layer, time: float) -> tuple:
+        """Advance Alien Eye v2 saccade (gaze) + blink state machines.
+
+        A real eye fixates then jumps: the gaze target changes at random hold
+        intervals and the current gaze eases toward it fast. Blink is a short
+        closing→opening state machine fired at random intervals (sometimes double).
+        Returns (gaze_x, gaze_y, blink_amount).
+        """
+        if not st.eye_seeded:
+            st.eye_seeded = True
+            st.eye_last_t = time
+            st.eye_next_saccade = time
+            st.eye_next_blink = time + 1.5
+            return st.eye_gx, st.eye_gy, st.eye_blink_amt
+
+        dt = time - st.eye_last_t
+        st.eye_last_t = time
+        if dt < 0.0:
+            dt = 0.0
+        elif dt > 0.05:
+            dt = 0.05
+
+        # ── Saccade ──
+        scan_spd = max(layer.eye_scan_speed, 0.1)
+        if time > st.eye_next_saccade:
+            a = random.random() * 6.28318
+            rad = random.random() * layer.eye_scan_amp
+            st.eye_tx = math.cos(a) * rad
+            st.eye_ty = math.sin(a) * rad * 0.7      # less vertical amplitude
+            st.eye_next_saccade = time + (0.3 + random.random() * 0.8) / scan_spd
+        k = 1.0 - 0.001 ** (dt * scan_spd * 6.0)
+        st.eye_gx += (st.eye_tx - st.eye_gx) * k
+        st.eye_gy += (st.eye_ty - st.eye_gy) * k
+
+        # ── Blink ── (0 open, 1 shut) — short snap; ~1 in 8 is a double blink
+        blink = layer.eye_blink
+        CLOSE_DUR, OPEN_DUR = 0.06, 0.09
+        if blink <= 0.0:
+            st.eye_blink_amt = 0.0
+        elif st.eye_blink_state == 0:               # idle
+            if time > st.eye_next_blink:
+                st.eye_blink_state = 1
+                st.eye_blink_clock = 0.0
+                st.eye_double_queued = random.random() < 0.12
+        elif st.eye_blink_state == 1:               # closing
+            st.eye_blink_clock += dt
+            st.eye_blink_amt = min(1.0, st.eye_blink_clock / CLOSE_DUR)
+            if st.eye_blink_clock >= CLOSE_DUR:
+                st.eye_blink_state = 2
+                st.eye_blink_clock = 0.0
+        elif st.eye_blink_state == 2:               # opening
+            st.eye_blink_clock += dt
+            st.eye_blink_amt = max(0.0, 1.0 - st.eye_blink_clock / OPEN_DUR)
+            if st.eye_blink_clock >= OPEN_DUR:
+                st.eye_blink_amt = 0.0
+                if st.eye_double_queued:
+                    st.eye_double_queued = False
+                    st.eye_blink_state = 1
+                    st.eye_blink_clock = 0.0
+                else:
+                    st.eye_blink_state = 0
+                    st.eye_next_blink = time + (1.5 + random.random() * 3.5) / max(blink, 0.1)
+
+        return st.eye_gx, st.eye_gy, st.eye_blink_amt
 
     def _update_kick(self, st: LayerState, layer: Layer, bars: np.ndarray,
                      time: float, pulse: float) -> None:
@@ -430,6 +565,8 @@ class Renderer:
             st.shock_armed = False
             st.shock_cooldown = 6                  # safety floor (~0.1 s)
 
+        # Band gains are already baked into lbars upstream (universal), so bass_v/
+        # mid_v/high_v here already reflect them — no extra multiply.
         self.prog["u_bass"].value = bass_v
         self.prog["u_mid"].value = mid_v
         self.prog["u_high"].value = high_v
