@@ -7,7 +7,7 @@ uniform int   u_symmetry;   // kaleidoscope sectors (1 = off), all modes
 uniform float u_hue;        // global hue shift 0-1 (post rotation, all modes)
 
 uniform int   u_num_bars;
-uniform float u_bars[256];
+uniform sampler2D u_bars_tex;   // R32F 512×1, bar values (texelFetch)
 uniform float u_pulse;
 uniform float u_pulse_intensity;
 uniform float u_max_bar_height;
@@ -92,8 +92,19 @@ uniform float u_tunnel_speed;     // base advance speed
 uniform float u_tunnel_kick_zoom; // zoom intensity on kick
 uniform float u_tunnel_chroma;    // chromatic aberration strength
 uniform float u_tunnel_bass_speed; // bass reactivity on speed
+uniform sampler2D u_spline_tex;   // modes 6/9: R32F 256×1, per-point deformation (1 = amplitude max)
+uniform int   u_spline_n;         // modes 6/9: control point count
+uniform float u_sine_amp;         // modes 6/9: max displacement, fraction of height
+uniform float u_sine_gap;         // mode 6: spline base radius / center circle radius
+uniform int   u_sine_glow;        // modes 6/9: glow passes (1-8)
+uniform float u_sine_fill;        // modes 6/9: interior fill opacity
+uniform float u_sine_mean;        // modes 6/9: mean deformation → amplitude palette colour
+uniform int   u_center_pixel;     // mode 6: center image pixelation block (px, 1 = off)
+uniform float u_res_y;            // canvas height in pixels
 
 const float PI = 3.14159265;
+
+float bar_at(int i) { return texelFetch(u_bars_tex, ivec2(i, 0), 0).r; }
 
 // ── HSV → RGB ────────────────────────────────────────────────────
 vec3 hsv2rgb(vec3 c) {
@@ -232,6 +243,46 @@ float catmull_rom(float p0, float p1, float p2, float p3, float t) {
     );
 }
 
+// ── Spline modes (6 Halo Sine / 9 Flat Sine) ────────────────────
+float spline_pt(int i, bool closed) {
+    int n = u_spline_n;
+    i = closed ? ((i % n) + n) % n : clamp(i, 0, n - 1);
+    return texelFetch(u_spline_tex, ivec2(i, 0), 0).r;
+}
+
+// Catmull-Rom through the control points at fractional index s → (value, d/ds).
+// Open splines clamp the phantom end points, closed ones wrap.
+vec2 spline_eval(float s, bool closed) {
+    float fi = floor(s);
+    int   i  = int(fi);
+    float t  = s - fi;
+    float p0 = spline_pt(i - 1, closed), p1 = spline_pt(i, closed);
+    float p2 = spline_pt(i + 1, closed), p3 = spline_pt(i + 2, closed);
+    float dv = 0.5 * ((-p0 + p2)
+                      + 2.0 * (2.0*p0 - 5.0*p1 + 4.0*p2 - p3) * t
+                      + 3.0 * (-p0 + 3.0*p1 - 3.0*p2 + p3) * t * t);
+    return vec2(catmull_rom(p0, p1, p2, p3, t), dv);
+}
+
+// Glow stroke stack: widest / dimmest pass first, narrowest / whitest last. Each
+// pass overwrites what is under it (no blending inside the overlay), as the PIL
+// renderer this replaces did. d_px = distance to the curve in pixels.
+vec4 sine_strokes(vec4 ov, float d_px, vec3 c) {
+    int g = clamp(u_sine_glow, 1, 8);
+    for (int p = 8; p >= 1; p--) {
+        if (p > g) continue;
+        float frac = 1.0 - float(p - 1) / float(max(g - 1, 1));
+        float cov  = clamp(float(p) * 1.5 + 0.5 - d_px, 0.0, 1.0);   // width = 3p px
+        ov = mix(ov, vec4(mix(c, vec3(1.0), frac * 0.65), (40.0 + frac * 215.0) / 255.0), cov);
+    }
+    return ov;
+}
+
+// Coverage of the pixel band [lo, hi] (pixels) at distance d.
+float band_px(float d, float lo, float hi) {
+    return clamp(d - lo + 0.5, 0.0, 1.0) * clamp(hi - d + 0.5, 0.0, 1.0);
+}
+
 // ── helpers for flat viz types ───────────────────────────────────
 bool in_bar_slot(float uv_x) {
     float frac = fract(uv_x * float(u_num_bars));
@@ -270,7 +321,7 @@ void main() {
         color = bg + glow * u_pal0;
 
         int   bar_idx = int(t_ang * float(u_num_bars)) % u_num_bars;
-        float bar_val = clamp(u_bars[bar_idx] * u_sensitivity, 0.0, 1.0);
+        float bar_val = clamp(bar_at(bar_idx) * u_sensitivity, 0.0, 1.0);
         float bar_len = bar_val * 0.55 * u_max_bar_height;
         float freq_t0 = t_ang;
 
@@ -313,7 +364,7 @@ void main() {
     // ── Miroir ──────────────────────────────────────────────────
     } else if (u_viz_type == 1) {
         int   bar_idx = bar_index_x(v_uv.x);
-        float bar_val = clamp(u_bars[bar_idx] * u_sensitivity, 0.0, 1.0);
+        float bar_val = clamp(bar_at(bar_idx) * u_sensitivity, 0.0, 1.0);
         float bar_len = bar_val * u_max_bar_height;
         float y_dist  = abs(v_uv.y - 0.5) * 2.0;
         float freq_t1 = float(bar_idx) / float(max(u_num_bars - 1, 1));
@@ -329,7 +380,7 @@ void main() {
     // ── Linéaire ────────────────────────────────────────────────
     } else if (u_viz_type == 2) {
         int   bar_idx = bar_index_x(v_uv.x);
-        float bar_val = clamp(u_bars[bar_idx] * u_sensitivity, 0.0, 1.0);
+        float bar_val = clamp(bar_at(bar_idx) * u_sensitivity, 0.0, 1.0);
         float bar_len = bar_val * u_max_bar_height;
         float freq_t2 = float(bar_idx) / float(max(u_num_bars - 1, 1));
 
@@ -349,7 +400,7 @@ void main() {
         for (int k = 0; k < 128; k++) {
             float t   = float(k) / 128.0 * 2.0 * PI;
             int bidx  = int(float(k) / 128.0 * float(u_num_bars)) % u_num_bars;
-            float mod = 1.0 + clamp(u_bars[bidx] * u_sensitivity, 0.0, 1.0) * 0.35;
+            float mod = 1.0 + clamp(bar_at(bidx) * u_sensitivity, 0.0, 1.0) * 0.35;
 
             float cx = u_lissa_energy * mod * sin(u_lissa_a * t + phase);
             float cy = u_lissa_energy          * sin(u_lissa_b * t);
@@ -384,10 +435,10 @@ void main() {
         int   i3    = (i1 + 2) % u_num_bars;
         float t_cr  = fract(bar_f);
 
-        float p0 = clamp(u_bars[i0] * u_sensitivity, 0.0, 1.0);
-        float p1 = clamp(u_bars[i1] * u_sensitivity, 0.0, 1.0);
-        float p2 = clamp(u_bars[i2] * u_sensitivity, 0.0, 1.0);
-        float p3 = clamp(u_bars[i3] * u_sensitivity, 0.0, 1.0);
+        float p0 = clamp(bar_at(i0) * u_sensitivity, 0.0, 1.0);
+        float p1 = clamp(bar_at(i1) * u_sensitivity, 0.0, 1.0);
+        float p2 = clamp(bar_at(i2) * u_sensitivity, 0.0, 1.0);
+        float p3 = clamp(bar_at(i3) * u_sensitivity, 0.0, 1.0);
         float r_fft = clamp(catmull_rom(p0, p1, p2, p3, t_cr), 0.0, 1.0);
 
         // Pulsing base radius + FFT displacement
@@ -577,13 +628,79 @@ void main() {
             }
         }
 
-    // ── Sine Plat — background only; waveform drawn by PIL ──
+    // ── Sine Plat — horizontal spline mirrored top/bottom ──
     } else if (u_viz_type == 9) {
+        float n    = float(u_spline_n);
+        float w_px = u_res_y * u_aspect;
+        float s    = clamp(v_uv.x, 0.0, 1.0) * (n - 1.0);
+        vec2  dv   = spline_eval(s, false) * (u_sine_amp * u_res_y);   // px, px / index
+        float slope = dv.y * (n - 1.0) / w_px;                          // px / px
+        float dy   = abs(v_uv.y - 0.5) * u_res_y;
+        float d_px = abs(dy - dv.x) / sqrt(1.0 + slope * slope);
 
-    // ── Halo Sine — background only; spline, ring, and center image drawn by PIL ──
+        vec3 c = (u_pal_mode == 1) ? pal(s / max(n - 1.0, 1.0))
+                                   : pal(clamp(u_sine_mean, 0.0, 1.0));
+        vec4 ov = vec4(c, u_sine_fill) * clamp(dv.x - dy + 0.5, 0.0, 1.0)
+                  * step(0.0001, u_sine_fill);
+        ov = sine_strokes(ov, d_px, c);
+        color = mix(color, ov.rgb, ov.a);
+
+    // ── Halo Sine — closed spline around the center circle, ring + center image ──
     } else if (u_viz_type == 6) {
-        // Ring, glow, and center image are composited in Python so they appear
-        // above the spline overlay. Nothing to add here beyond the background.
+        vec2  uv_c = (v_uv * 2.0 - 1.0) * vec2(u_aspect, 1.0);
+        float dist = length(uv_c);
+        float px   = 2.0 / u_res_y;                  // one pixel in uv_c units
+        float n    = float(u_spline_n);
+
+        // Control point 0 at the top, then clockwise on screen, offset by rotation
+        float a = atan(uv_c.y, uv_c.x);
+        float s = mod((0.5 * PI - u_rotation - a) / (2.0 * PI) * n, n);
+        vec2  rv = spline_eval(s, true) * (u_sine_amp * 2.0);
+        float r_curve = u_halo_r_base * u_sine_gap + rv.x;
+        // dr/dθ over r; floored so the term stays finite near the center
+        float slope   = rv.y * n / (2.0 * PI) / max(dist, 0.5 * r_curve);
+        float d_px    = abs(dist - r_curve) / sqrt(1.0 + slope * slope) / px;
+
+        float freq_t = 1.0 - abs(2.0 * s / max(n - 1.0, 1.0) - 1.0);
+        vec3  c = (u_pal_mode == 1) ? pal(clamp(freq_t, 0.0, 1.0))
+                                    : pal(clamp(u_sine_mean, 0.0, 1.0));
+
+        // Interior fill, punched out at the center circle (unpulsed radius)
+        float in_fill = clamp((r_curve - dist) / px + 0.5, 0.0, 1.0)
+                      * clamp((dist - u_halo_r_base) / px + 0.5, 0.0, 1.0);
+        vec4 ov = vec4(c, u_sine_fill) * in_fill * step(0.0001, u_sine_fill);
+        ov = sine_strokes(ov, d_px, c);
+        color = mix(color, ov.rgb, ov.a);
+
+        // Center image (pulsing), optionally pixelated
+        float r_c = u_halo_r_base * (1.0 + 0.10 * u_pulse * u_pulse_intensity);
+        if (u_has_center == 1) {
+            vec2 uvt = uv_c / r_c * 0.5 + 0.5;
+            if (u_center_pixel > 1) {
+                float blk = float(u_center_pixel) * px / (2.0 * r_c);
+                uvt = (floor(uvt / blk) + 0.5) * blk;
+            }
+            float mask = clamp((r_c - dist) / px + 0.5, 0.0, 1.0);
+            color = mix(color, texture(u_center_texture, clamp(uvt, 0.0, 1.0)).rgb, mask);
+        }
+
+        // Ring glow around the center circle. Elements overwrite each other in draw
+        // order; the resulting alpha lands cubed on colour / squared on the
+        // background, matching the look of the former PIL patch composite.
+        float rr  = max(4.0, r_c / px);
+        float dpx = dist / px;
+        float e1  = max(1.0, floor(rr / 35.0));
+        float rw  = max(2.0, floor(rr / 20.0));
+        vec4  ring = vec4(0.0);
+        ring = mix(ring, vec4(u_pal0, 20.0 / 255.0), band_px(dpx, -1.0, rr * 1.5));
+        ring = mix(ring, vec4(u_pal0, 12.0 / 255.0), band_px(dpx, -1.0, rr));
+        for (int i = 7; i >= 1; i--) {
+            ring = mix(ring, vec4(u_pal0, float(i) * 5.0 / 255.0),
+                       band_px(dpx, rr - 1.0, rr + float(i) * e1));
+        }
+        ring = mix(ring, vec4(u_pal1, 200.0 / 255.0), band_px(dpx, rr - rw, rr));
+        ring = mix(ring, vec4(vec3(1.0), 85.0 / 255.0), band_px(dpx, rr - rw * 0.5, rr));
+        color = color * (1.0 - ring.a * ring.a) + ring.rgb * ring.a * ring.a * ring.a;
 
     // ── Nuclear Shockwave — deep space + white shockwaves fired on each kick ──
     } else if (u_viz_type == 10) {

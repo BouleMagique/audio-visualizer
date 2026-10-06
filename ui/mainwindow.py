@@ -14,12 +14,14 @@ from PySide6.QtWidgets import (
     QColorDialog, QListWidget, QListWidgetItem, QAbstractItemView, QScrollArea,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QGuiApplication
 
 from core.audio import AudioFile
 from core.fft import FFTProcessor
+from core.live_input import LiveInput, list_sources, LIVE_SR
 from core.layer import Layer, LayerManager, MAX_VISUAL_LAYERS, BLEND_ADDITIVE, BLEND_NORMAL
 from ui.preview import PreviewWidget
+from ui.output_window import OutputWindow
 from config.defaults import (
     NUM_BARS, MAX_BAR_HEIGHT, SMOOTHING_DECAY, PULSE_INTENSITY,
     SENSITIVITY, FPS, RESOLUTIONS, FFT_SIZE, PALETTES, VIZ_TYPES,
@@ -45,6 +47,9 @@ from config.defaults import (
 )
 
 FFT_ANALYSIS_BARS = 256   # global analysis resolution; layers resample from this
+FFT_ANALYSIS_BARS_MAX = 512   # raised to this only while a layer asks for > 256 bars
+# Live analysis windows: shorter = snappier but coarser bass. Delay ≈ half the window.
+LIVE_FFT_SIZES = {"Réactif · 1024": 1024, "Équilibré · 2048": 2048, "Précis · 4096": 4096}
 
 _RADIAL_MODES     = {0, 4, 5, 6, 7}
 _ROTATION_MODES   = {0, 4, 5, 6, 7}
@@ -171,6 +176,14 @@ class MainWindow(QMainWindow):
         self._audio: AudioFile | None = None
         self._fft:   FFTProcessor | None = None
         self._playback_thread: AudioPlaybackThread | None = None
+        self._live: LiveInput | None = None
+        self._live_last = None                  # last (bars, pulse), shared by both views
+        self._output: OutputWindow | None = None
+        self._output_timer = QTimer(self)
+        self._output_timer.timeout.connect(self._update_output_status)
+        self._live_fft: FFTProcessor | None = None
+        self._live_timer = QTimer(self)
+        self._live_timer.timeout.connect(self._update_live_status)
         self._export_thread:   QThread | None = None
         self._bg_image_path:     str | None = None
         self._center_image_path: str | None = None
@@ -188,6 +201,8 @@ class MainWindow(QMainWindow):
         self._custom_palette_freq = [list(c) for c in _default]
 
         self._build_ui()
+        self._refresh_live_sources()
+        self._refresh_screens()
         self._preview.set_layer_manager(self._lm)
         self._refresh_layer_list()
         self._load_layer_into_ui(self._lm.selected())
@@ -282,7 +297,67 @@ class MainWindow(QMainWindow):
         btn_open.clicked.connect(self._open_file)
         al.addWidget(self._file_label)
         al.addWidget(btn_open)
+
+        # Live input: analyse what the machine plays (or any input) instead of a file
+        src_row = QHBoxLayout()
+        self._combo_live_src = QComboBox()
+        self._combo_live_src.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self._combo_live_src.currentIndexChanged.connect(self._on_live_settings_changed)
+        btn_refresh = QPushButton("⟳")
+        btn_refresh.setFixedWidth(32)
+        btn_refresh.setToolTip("Rafraîchir les sources")
+        btn_refresh.clicked.connect(self._refresh_live_sources)
+        src_row.addWidget(self._combo_live_src, 1)
+        src_row.addWidget(btn_refresh)
+        al.addLayout(src_row)
+        self._combo_live_fft = QComboBox()
+        self._combo_live_fft.addItems(list(LIVE_FFT_SIZES))
+        self._combo_live_fft.setCurrentText("Équilibré · 2048")
+        self._combo_live_fft.setToolTip("Fenêtre d'analyse : réactif = moins de retard, "
+                                        "précis = basses plus détaillées")
+        self._combo_live_fft.currentIndexChanged.connect(self._on_live_settings_changed)
+        al.addWidget(self._combo_live_fft)
+        self._btn_live = QPushButton("● Live")
+        self._btn_live.setCheckable(True)
+        self._btn_live.toggled.connect(self._toggle_live)
+        al.addWidget(self._btn_live)
+        self._live_meter = QProgressBar()
+        self._live_meter.setRange(0, 60)
+        self._live_meter.setTextVisible(False)
+        self._live_meter.setFixedHeight(6)
+        self._live_meter.setVisible(False)
+        al.addWidget(self._live_meter)
         pl.addWidget(ag)
+
+        # ── Output (projector) ──
+        og = QGroupBox("Sortie")
+        ol = QVBoxLayout(og)
+        scr_row = QHBoxLayout()
+        self._combo_screen = QComboBox()
+        self._combo_screen.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        btn_scr = QPushButton("⟳")
+        btn_scr.setFixedWidth(32)
+        btn_scr.setToolTip("Rafraîchir les écrans")
+        btn_scr.clicked.connect(self._refresh_screens)
+        scr_row.addWidget(self._combo_screen, 1)
+        scr_row.addWidget(btn_scr)
+        ol.addLayout(scr_row)
+        self._chk_out_full = QCheckBox("Plein écran")
+        self._chk_out_full.setChecked(True)
+        ol.addWidget(self._chk_out_full)
+        self._chk_out_pause_preview = QCheckBox("Couper la preview pendant la sortie")
+        self._chk_out_pause_preview.setChecked(True)
+        self._chk_out_pause_preview.toggled.connect(
+            lambda on: self._preview.set_paused(on and self._output is not None))
+        ol.addWidget(self._chk_out_pause_preview)
+        self._btn_output = QPushButton("⧉ Ouvrir la sortie")
+        self._btn_output.setCheckable(True)
+        self._btn_output.toggled.connect(self._toggle_output)
+        ol.addWidget(self._btn_output)
+        self._out_status = QLabel("Échap : fermer · F / double-clic : plein écran")
+        self._out_status.setWordWrap(True)
+        ol.addWidget(self._out_status)
+        pl.addWidget(og)
 
         # ── Layers ──
         lg = QGroupBox("Calques")
@@ -432,7 +507,7 @@ class MainWindow(QMainWindow):
         pg = QGroupBox("Paramètres")
         pf = QFormLayout(pg)
         self._row_bars = self._make_slider_row(
-            pf, "Barres", 32, 256, NUM_BARS, self._on_params_changed)
+            pf, "Barres", 32, 512, NUM_BARS, self._on_params_changed)
         self._row_height = self._make_slider_row(
             pf, "Hauteur max (×0.01)", 30, 250, int(MAX_BAR_HEIGHT * 100),
             self._on_params_changed, auto=True)
@@ -898,7 +973,7 @@ class MainWindow(QMainWindow):
         layer = self._lm.selected()
         if layer is None:
             return
-        self._preview.release_layer_state(layer.id)
+        self._each_view(lambda v: v.release_layer_state(layer.id))
         self._lm.remove_layer(layer.id)
         self._refresh_layer_list()
         if self._lm.selected():
@@ -985,7 +1060,7 @@ class MainWindow(QMainWindow):
             self._status.setText("Preset vide ou invalide.")
             return
         for l in self._lm.layers:                 # free old GL state
-            self._preview.release_layer_state(l.id)
+            self._each_view(lambda v: v.release_layer_state(l.id))
         self._lm.layers = new_layers
         self._lm.selected_id = new_layers[0].id
 
@@ -999,22 +1074,22 @@ class MainWindow(QMainWindow):
         if bg_path and Path(bg_path).exists():
             self._bg_label.setText(Path(bg_path).name)
             self._btn_bg_clear.setEnabled(True)
-            self._preview.load_background(bg_path)
+            self._each_view(lambda v: v.load_background(bg_path))
         else:
             self._bg_label.setText("Aucune image")
             self._btn_bg_clear.setEnabled(False)
-            self._preview.clear_background()
+            self._each_view(lambda v: v.clear_background())
 
         ctr = data.get("center_image_path")
         self._center_image_path = ctr
         if ctr and Path(ctr).exists():
             self._center_label.setText(Path(ctr).name)
             self._btn_ctr_clear.setEnabled(True)
-            self._preview.load_center_image(ctr)
+            self._each_view(lambda v: v.load_center_image(ctr))
         else:
             self._center_label.setText("Aucune image")
             self._btn_ctr_clear.setEnabled(False)
-            self._preview.clear_center_image()
+            self._each_view(lambda v: v.clear_center_image())
 
         self._loading = True
         self._sl(self._row_bg_opacity).setValue(int(self._lm.bg.opacity * 100))
@@ -1340,10 +1415,12 @@ class MainWindow(QMainWindow):
     def _use_cqt(self) -> bool:
         return self._cqt_check.isChecked()
 
-    def _make_fft(self) -> FFTProcessor:
+    def _make_fft(self, sr: int | None = None, fft_size: int | None = None) -> FFTProcessor:
+        extra = {"fft_size": fft_size} if fft_size else {}
         return FFTProcessor(
-            sr=self._audio.sr,
-            num_bars=FFT_ANALYSIS_BARS,
+            sr=sr or self._audio.sr,
+            **extra,
+            num_bars=self._analysis_bars(),
             smoothing_decay=self._sl(self._row_smooth).value() / 100,
             bass_split=self._sl(self._row_bass_split).value() / 100,
             bass_split_hz=float(self._sl(self._row_bass_hz).value()),
@@ -1376,14 +1453,14 @@ class MainWindow(QMainWindow):
         self._lm.bg.image_path = path
         self._bg_label.setText(Path(path).name)
         self._btn_bg_clear.setEnabled(True)
-        self._preview.load_background(path)
+        self._each_view(lambda v: v.load_background(path))
 
     def _clear_bg_image(self):
         self._bg_image_path = None
         self._lm.bg.image_path = None
         self._bg_label.setText("Aucune image")
         self._btn_bg_clear.setEnabled(False)
-        self._preview.clear_background()
+        self._each_view(lambda v: v.clear_background())
 
     def _on_bg_changed(self):
         if self._loading:
@@ -1400,13 +1477,13 @@ class MainWindow(QMainWindow):
         self._center_image_path = path
         self._center_label.setText(Path(path).name)
         self._btn_ctr_clear.setEnabled(True)
-        self._preview.load_center_image(path)
+        self._each_view(lambda v: v.load_center_image(path))
 
     def _clear_center_image(self):
         self._center_image_path = None
         self._center_label.setText("Aucune image")
         self._btn_ctr_clear.setEnabled(False)
-        self._preview.clear_center_image()
+        self._each_view(lambda v: v.clear_center_image())
 
     def _on_viz_changed(self):
         if self._loading:
@@ -1415,18 +1492,28 @@ class MainWindow(QMainWindow):
         self._on_params_changed()
         self._refresh_selected_item_label()
 
+    def _analysis_bars(self) -> int:
+        """256 analysis bands, or 512 while some layer draws more than 256 bars — real
+        bands rather than interpolated ones, without changing the look of the others."""
+        most = max((l.num_bars for l in self._lm.layers), default=0)
+        return FFT_ANALYSIS_BARS_MAX if most > FFT_ANALYSIS_BARS else FFT_ANALYSIS_BARS
+
     def _on_params_changed(self):
         if self._loading:
             return
         layer = self._lm.selected()
         if layer is not None:
             self._write_ui_to_layer(layer)
+        current = self._live_fft or self._fft
+        if current is not None and current.num_bars != self._analysis_bars():
+            self._on_freq_changed()     # rebuilds the file and / or live analysis
 
     def _on_global_smoothing_changed(self):
         if self._loading:
             return
-        if self._fft:
-            self._fft.smoothing_decay = self._sl(self._row_smooth).value() / 100
+        for fft in (self._fft, self._live_fft):
+            if fft:
+                fft.smoothing_decay = self._sl(self._row_smooth).value() / 100
 
     def _on_freq_mode_changed(self):
         self._update_freq_ui(cqt=self._use_cqt())
@@ -1435,6 +1522,8 @@ class MainWindow(QMainWindow):
     def _on_freq_changed(self):
         if self._loading:
             return
+        if self._live is not None:
+            self._live_fft = self._make_live_fft()
         if self._audio:
             new_fft = self._make_fft()
             if self._playback_thread and self._playback_thread.isRunning():
@@ -1486,7 +1575,7 @@ class MainWindow(QMainWindow):
         self._fft = self._make_fft()
         self._playback_thread = AudioPlaybackThread(
             self._audio, self._fft, fps, start_frame=frame, volume=self._volume)
-        self._playback_thread.frame_ready.connect(self._preview.update_audio_data)
+        self._playback_thread.frame_ready.connect(self._on_frame_ready)
         self._playback_thread.position_changed.connect(self._on_position_changed)
         self._playback_thread.finished.connect(self._on_playback_done)
         self._playback_thread.start()
@@ -1504,7 +1593,7 @@ class MainWindow(QMainWindow):
         fps = int(self._combo_fps.currentText())
         self._playback_thread = AudioPlaybackThread(
             self._audio, self._fft, fps, start_frame=self._seek_frame, volume=self._volume)
-        self._playback_thread.frame_ready.connect(self._preview.update_audio_data)
+        self._playback_thread.frame_ready.connect(self._on_frame_ready)
         self._playback_thread.position_changed.connect(self._on_position_changed)
         self._playback_thread.finished.connect(self._on_playback_done)
         self._playback_thread.start()
@@ -1573,6 +1662,176 @@ class MainWindow(QMainWindow):
         self._btn_export.setEnabled(True)
         self._status.setText(f"Erreur export :\n{msg}")
 
+    # ── Live input ───────────────────────────────────────────────
+    def _refresh_live_sources(self):
+        current = self._combo_live_src.currentData()
+        sources, idx = list_sources()
+        self._combo_live_src.blockSignals(True)
+        self._combo_live_src.clear()
+        for src in sources:
+            self._combo_live_src.addItem(src.label, src)
+        keep = next((i for i, s in enumerate(sources) if s == current), idx)
+        self._combo_live_src.setCurrentIndex(keep)
+        self._combo_live_src.blockSignals(False)
+        self._btn_live.setEnabled(bool(sources))
+
+    def _make_live_fft(self) -> FFTProcessor:
+        return self._make_fft(sr=LIVE_SR,
+                              fft_size=LIVE_FFT_SIZES[self._combo_live_fft.currentText()])
+
+    def _live_compute(self):
+        self._live_last = self._live_fft.process(self._live.latest(self._live_fft.fft_size))
+        return self._live_last
+
+    def _live_cached(self):
+        return self._live_last if self._live_last is not None else self._live_compute()
+
+    def _wire_live_feed(self):
+        """One analysis per frame: the output window (vsync-paced) runs it when open and
+        the preview reuses the result — two analyses per frame would double the decay."""
+        self._live_last = None
+        if self._live is None:
+            self._each_view(lambda v: v.set_audio_provider(None))
+        elif self._output is not None:
+            self._output.set_audio_provider(self._live_compute)
+            self._preview.set_audio_provider(self._live_cached)
+        else:
+            self._preview.set_audio_provider(self._live_compute)
+
+    def _toggle_live(self, on: bool):
+        if on:
+            self._start_live()
+        else:
+            self._stop_live()
+
+    def _start_live(self):
+        src = self._combo_live_src.currentData()
+        if src is None:
+            self._btn_live.setChecked(False)
+            return
+        self._stop_playback()
+        live = LiveInput(src)
+        try:
+            live.start()
+        except Exception as e:      # PortAudio raises plain Exceptions on open
+            self._status.setText(f"Live : impossible d'ouvrir la source ({e})")
+            self._btn_live.blockSignals(True)
+            self._btn_live.setChecked(False)
+            self._btn_live.blockSignals(False)
+            return
+        self._live = live
+        self._live_fft = self._make_live_fft()
+        self._wire_live_feed()
+        self._btn_live.setText("■ Live")
+        self._btn_play.setEnabled(False)
+        self._live_meter.setVisible(True)
+        self._live_timer.start(100)
+        self._update_live_status()
+
+    def _stop_live(self):
+        self._live_timer.stop()
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+        self._wire_live_feed()
+        self._live_fft = None
+        self._btn_live.setText("● Live")
+        self._btn_play.setEnabled(self._audio is not None)
+        self._live_meter.setVisible(False)
+        self._status.setText("")
+
+    def _on_live_settings_changed(self):
+        if self._live is not None:      # apply by reopening on the new source / window
+            self._stop_live()
+            self._btn_live.blockSignals(True)
+            self._btn_live.setChecked(True)
+            self._btn_live.blockSignals(False)
+            self._start_live()
+
+    def _update_live_status(self):
+        if self._live is None:
+            return
+        db = 20.0 * math.log10(max(self._live.peak, 1e-6))
+        self._live_meter.setValue(int(max(0.0, db + 60.0)))
+        in_ms = self._live.input_latency * 1000
+        fft_ms = self._live_fft.fft_size / 2 / LIVE_SR * 1000
+        self._status.setText(f"Live · entrée {in_ms:.0f} ms + analyse {fft_ms:.0f} ms")
+
+    # ── Views (preview + optional output window) ─────────────────
+    def _each_view(self, fn):
+        fn(self._preview)
+        if self._output is not None:
+            fn(self._output)
+
+    def _on_frame_ready(self, bars, pulse):
+        self._each_view(lambda v: v.update_audio_data(bars, pulse))
+
+    # ── Output window ────────────────────────────────────────────
+    def _refresh_screens(self):
+        current = self._combo_screen.currentData()
+        screens = QGuiApplication.screens()
+        primary = QGuiApplication.primaryScreen()
+        self._combo_screen.clear()
+        for scr in screens:
+            g = scr.geometry()
+            tag = " (principal)" if scr is primary else ""
+            self._combo_screen.addItem(f"{scr.name()} · {g.width()}×{g.height()}{tag}",
+                                       scr.name())
+        names = [scr.name() for scr in screens]
+        if current in names:
+            idx = names.index(current)
+        else:   # default: first screen that is not the one the UI lives on
+            idx = next((i for i, scr in enumerate(screens) if scr is not primary), 0)
+        self._combo_screen.setCurrentIndex(idx)
+
+    def _toggle_output(self, on: bool):
+        if on:
+            self._open_output()
+        elif self._output is not None:
+            self._output.close()        # → _on_output_closed
+
+    def _open_output(self):
+        name = self._combo_screen.currentData()
+        screen = next((s for s in QGuiApplication.screens() if s.name() == name),
+                      QGuiApplication.primaryScreen())
+        out = OutputWindow(self._lm, self._bg_image_path, self._center_image_path)
+        out.closed.connect(self._on_output_closed)
+        out.setScreen(screen)
+        g = screen.geometry()
+        if self._chk_out_full.isChecked():
+            out.setGeometry(g)
+            out.showFullScreen()
+        else:
+            out.resize(1280, 720)
+            out.setPosition(g.x() + (g.width() - 1280) // 2, g.y() + (g.height() - 720) // 2)
+            out.show()
+        self._output = out
+        self._wire_live_feed()
+        self._preview.set_paused(self._chk_out_pause_preview.isChecked())
+        self._btn_output.setText("✕ Fermer la sortie")
+        self._output_timer.start(500)
+
+    def _on_output_closed(self):
+        self._output = None
+        self._preview.set_paused(False)
+        self._output_timer.stop()
+        self._wire_live_feed()
+        self._btn_output.blockSignals(True)
+        self._btn_output.setChecked(False)
+        self._btn_output.blockSignals(False)
+        self._btn_output.setText("⧉ Ouvrir la sortie")
+        self._out_status.setText("Échap : fermer · F / double-clic : plein écran")
+
+    def _update_output_status(self):
+        if self._output is None:
+            return
+        w, h = self._output._pixel_size()
+        self._out_status.setText(f"{w}×{h} · {self._output.fps:.0f} i/s · "
+                                 f"rendu {self._output.render_ms:.1f} ms")
+
     def closeEvent(self, event):
+        if self._output is not None:
+            self._output.close()
+        self._stop_live()
         self._stop_playback()
         super().closeEvent(event)

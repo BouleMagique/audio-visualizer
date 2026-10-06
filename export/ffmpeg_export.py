@@ -43,7 +43,9 @@ class FFmpegExporter:
         self.fft = FFTProcessor(
             sr=audio.sr,
             fft_size=FFT_SIZE,
-            num_bars=FFT_ANALYSIS_BARS,
+            # 512 bands while a layer draws > 256 bars (same rule as the preview)
+            num_bars=(512 if max((l.num_bars for l in layer_manager.layers), default=0)
+                      > FFT_ANALYSIS_BARS else FFT_ANALYSIS_BARS),
             smoothing_decay=smoothing_decay,
             bass_split=bass_split,
             bass_split_hz=bass_split_hz,

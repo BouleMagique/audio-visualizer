@@ -59,16 +59,26 @@ python main.py
 |------|-------------|
 | Radial | Circular bars radiating outward |
 | Mirror | Symmetric vertical bars |
-| Linear | Bottom-up bars |
+| Linear | Bottom-up bars (up to 512) |
 | Oscilloscope | Lissajous figure |
 | Halo | Smooth waveform ring |
 | Halo Bass | Polar bass waterfall (12 rings) |
-| Halo Sine | Catmull-Rom spline, PIL-rendered |
+| Halo Sine | Catmull-Rom spline ring with glow, fill and center image |
 | Halo Bass 2 | EMA-smoothed neon waterfall |
 | Tunnel Arcade | SDF polygon tunnel, kick warp, chromatic aberration |
 | Sine Plat | Horizontal mirrored waveform |
 | Nuclear Shockwave | Concentric kick-triggered shockwaves |
 | Void Pull | Spiral with gravity-pull on kick |
+
+## Live mode (projection / VJ)
+
+- **● Live** (Audio group): analyses what the machine plays instead of a file.
+  - Linux (PipeWire / PulseAudio): pick a "Sortie PC" monitor — YouTube, Spotify, Traktor…
+  - macOS: install [BlackHole](https://github.com/ExistentialAudio/BlackHole) and route the output to it (Multi-Output Device to keep hearing it).
+  - Windows: "Stereo Mix" if available, otherwise [VB-Cable](https://vb-audio.com/Cable/).
+  - Analysis window: Réactif 1024 (~11 ms) / Équilibré 2048 (~21 ms) / Précis 4096 (~43 ms).
+- **Sortie** group: opens the composition alone, fullscreen on the chosen screen (projector), vsync-paced. Esc closes, F / double-click toggles fullscreen. The preview pauses while it runs (optional).
+- On a Wayland session the app runs through XWayland (`QT_QPA_PLATFORM=xcb`): ModernGL attaches to Qt's GL contexts through GLX only. Set `QT_QPA_PLATFORM` yourself to override.
 
 ## Features
 
@@ -88,5 +98,5 @@ python main.py
 | Audio playback | sounddevice |
 | FFT / DSP | numpy + scipy |
 | UI | PySide6 |
-| PIL overlay | Pillow |
+| Images | Pillow |
 | Export | FFmpeg (subprocess) |

@@ -4,7 +4,7 @@ import moderngl
 import numpy as np
 from collections import deque
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image
 from config.defaults import (
     CIRCLE_RADIUS_RATIO, BAR_WIDTH, PALETTES, SENSITIVITY,
 )
@@ -16,8 +16,10 @@ SHADER_DIR = Path(__file__).parent / "shaders"
 _DEFAULT_PALETTE = list(PALETTES.values())[0]
 
 _BASS_HIST_N  = 64    # history frames
-_BASS_HIST_W  = 256   # fixed width = u_bars max
+_BASS_HIST_W  = 256   # history width (modes 5/7 read the low third of the bars)
+_BARS_MAX     = 512   # u_bars_tex width = max bars per layer
 _BASS2_DECAY  = 0.93  # EMA decay for Halo Bass 2 (bidirectional smooth)
+_SPLINE_MAX   = 256   # max control points for modes 6/9 (UI caps halo_n_points at 256)
 
 
 def _load_shader(name: str) -> str:
@@ -25,7 +27,7 @@ def _load_shader(name: str) -> str:
 
 
 class LayerState:
-    """Per-layer mutable render state: audio history, PIL mode instances, FBO.
+    """Per-layer mutable render state: audio history, spline analysis, FBO.
 
     History textures are canvas-size-independent (256×64) so they survive a
     canvas resize; only the layer FBO is recreated.
@@ -80,6 +82,8 @@ class LayerState:
 
         self.halo_sine = HaloSineMode()
         self.flat_sine = FlatSineMode()
+        # Spline control values for modes 6/9 (u_spline_tex), read with texelFetch
+        self.spline_tex = ctx.texture((_SPLINE_MAX, 1), 1, dtype='f4')
 
         self.fbo: moderngl.Framebuffer | None = None
         self.resize(width, height)
@@ -94,6 +98,7 @@ class LayerState:
     def release(self) -> None:
         self.bass_hist_tex.release()
         self.bass_hist2_tex.release()
+        self.spline_tex.release()
         if self.fbo:
             self.fbo.color_attachments[0].release()
             self.fbo.release()
@@ -107,7 +112,6 @@ class Renderer:
         self._bg_texture: moderngl.Texture | None = None
         self._bg_img_aspect: float = 1.0
         self._center_texture: moderngl.Texture | None = None
-        self._center_pil: "Image.Image | None" = None
 
         if ctx is None:
             self.ctx = moderngl.create_standalone_context()
@@ -120,6 +124,7 @@ class Renderer:
 
         self._build_programs()
         self._build_quad()
+        self._bars_tex = self.ctx.texture((_BARS_MAX, 1), 1, dtype="f4")
         self.fbo: moderngl.Framebuffer | None = None
         self.resize(width, height)
 
@@ -207,9 +212,7 @@ class Renderer:
     def load_center_image(self, path: str) -> None:
         if self._center_texture:
             self._center_texture.release()
-        pil_src = Image.open(path).convert("RGBA")
-        self._center_pil = pil_src
-        img = pil_src.transpose(Image.FLIP_TOP_BOTTOM)
+        img = Image.open(path).convert("RGBA").transpose(Image.FLIP_TOP_BOTTOM)
         self._center_texture = self.ctx.texture(img.size, 4, img.tobytes())
         self._center_texture.build_mipmaps()
         self._center_texture.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
@@ -218,7 +221,6 @@ class Renderer:
         if self._center_texture:
             self._center_texture.release()
             self._center_texture = None
-        self._center_pil = None
 
     # ── Composition pipeline ─────────────────────────────────────
     def render_composition(self, lm: LayerManager, bars: np.ndarray, pulse: float,
@@ -296,9 +298,10 @@ class Renderer:
         self.ctx.enable(moderngl.BLEND)
         self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
-        bar_data = np.zeros(256, dtype="f4")
-        n = min(len(lbars), 256)
+        bar_data = np.zeros(_BARS_MAX, dtype="f4")
+        n = min(len(lbars), _BARS_MAX)
         bar_data[:n] = lbars[:n]
+        nh = min(n, _BASS_HIST_W)
 
         # Visual layers never draw the bg image; render on pure black for clean additive
         self.prog["u_has_bg"].value = 0
@@ -317,7 +320,9 @@ class Renderer:
             self.prog[f"u_pal{i}"].value = tuple(rgb)
 
         self.prog["u_num_bars"].value = int(layer.num_bars)
-        self.prog["u_bars"].value = tuple(bar_data.tolist())
+        self._bars_tex.write(bar_data.tobytes())
+        self._bars_tex.use(location=5)
+        self.prog["u_bars_tex"].value = 5
         self.prog["u_pulse"].value = float(pulse)
         self.prog["u_pulse_intensity"].value = float(layer.pulse_intensity)
         self.prog["u_max_bar_height"].value = float(layer.max_bar_height)
@@ -396,16 +401,16 @@ class Renderer:
 
         # Bass waterfall history (mode 5)
         st.bass_history = np.roll(st.bass_history, 1, axis=0)
-        st.bass_history[0, :n] = lbars[:n]
+        st.bass_history[0, :nh] = lbars[:nh]
         st.bass_hist_tex.write(st.bass_history.tobytes())
         st.bass_hist_tex.use(location=2)
         self.prog["u_bass_history"].value = 2
 
         # Bass history 2 (mode 7) — bidirectional EMA
-        st.bass_smooth2[:n] = (st.bass_smooth2[:n] * _BASS2_DECAY
-                               + lbars[:n] * (1.0 - _BASS2_DECAY))
+        st.bass_smooth2[:nh] = (st.bass_smooth2[:nh] * _BASS2_DECAY
+                                + lbars[:nh] * (1.0 - _BASS2_DECAY))
         st.bass_history2 = np.roll(st.bass_history2, 1, axis=0)
-        st.bass_history2[0, :n] = st.bass_smooth2[:n]
+        st.bass_history2[0, :nh] = st.bass_smooth2[:nh]
         st.bass_hist2_tex.write(st.bass_history2.tobytes())
         st.bass_hist2_tex.use(location=3)
         self.prog["u_bass_history2"].value = 3
@@ -413,17 +418,11 @@ class Renderer:
         # Audio band decomposition + kick detection (Tunnel Arcade)
         self._update_kick(st, layer, lbars, time, pulse)
 
-        # Mode 6: center image composited AFTER spline in PIL — skip in GLSL
-        if viz_type == 6 and self._center_pil is not None:
-            self.prog["u_has_center"].value = 0
+        # Spline modes: CPU analysis → control values, drawn by the shader
+        if viz_type in (6, 9):
+            self._update_spline(st, layer, lbars)
 
         self.vao.render(moderngl.TRIANGLE_STRIP)
-
-        # PIL post passes
-        if viz_type == 6:
-            self._post_halo_sine(st, layer, lbars, pulse, palette)
-        elif viz_type == 9:
-            self._post_flat_sine(st, layer, lbars, palette)
 
     def _update_eye(self, st: LayerState, layer: Layer, time: float) -> tuple:
         """Advance Alien Eye v2 saccade (gaze) + blink state machines.
@@ -580,140 +579,25 @@ class Renderer:
         self.prog["u_tunnel_chroma"].value = float(layer.tunnel_chroma)
         self.prog["u_tunnel_bass_speed"].value = float(layer.tunnel_bass_speed)
 
-    def _post_halo_sine(self, st: LayerState, layer: Layer,
-                        bars: np.ndarray, pulse: float, palette: list) -> None:
-        raw = st.fbo.read(components=3)
-        pixels_bt = np.frombuffer(raw, dtype=np.uint8).reshape(self.height, self.width, 3)
-        pixels_tb = np.ascontiguousarray(pixels_bt[::-1])
-        result_tb = st.halo_sine.draw_overlay(
-            pixels_tb, bars=bars,
-            r_base=layer.halo_r_base, amplitude_max=layer.halo_amplitude,
-            n_points=layer.halo_n_points, glow_layers=layer.halo_glow_layers,
-            smoothing_decay=layer.halo_smoothing_decay,
-            sensitivity=layer.sensitivity, palette=palette,
-            rotation=layer.rotation,
-            fill_opacity=layer.halo_fill_opacity,
-            pal_mode=layer.pal_mode,
-            spline_gap=layer.halo_spline_gap,
-        )
-        r_px = layer.halo_r_base * self.height / 2
-        if self._center_pil is not None:
-            result_tb = self._composite_center_circle(
-                result_tb, self._center_pil, r_px,
-                pulse=pulse, pulse_intensity=layer.pulse_intensity,
-                pixel_size=layer.halo_pixel_size,
-            )
-        result_tb = self._draw_ring_glow(
-            result_tb, r_px, palette,
-            pulse=pulse, pulse_intensity=layer.pulse_intensity,
-        )
-        result_bt = np.ascontiguousarray(result_tb[::-1])
-        st.fbo.color_attachments[0].write(result_bt.tobytes())
-
-    def _post_flat_sine(self, st: LayerState, layer: Layer,
-                        bars: np.ndarray, palette: list) -> None:
-        raw = st.fbo.read(components=3)
-        pixels_bt = np.frombuffer(raw, dtype=np.uint8).reshape(self.height, self.width, 3)
-        pixels_tb = np.ascontiguousarray(pixels_bt[::-1])
-        result_tb = st.flat_sine.draw_overlay(
-            pixels_tb, bars=bars,
-            amplitude_max=layer.halo_amplitude,
-            n_points=layer.halo_n_points,
-            glow_layers=layer.halo_glow_layers,
-            smoothing_decay=layer.halo_smoothing_decay,
-            sensitivity=layer.sensitivity,
-            palette=palette,
-            fill_opacity=layer.halo_fill_opacity,
-            pal_mode=layer.pal_mode,
-        )
-        result_bt = np.ascontiguousarray(result_tb[::-1])
-        st.fbo.color_attachments[0].write(result_bt.tobytes())
-
-    # ── PIL helpers (stateless) ──────────────────────────────────
-    def _composite_center_circle(self, frame_tb: np.ndarray,
-                                  center_pil: "Image.Image",
-                                  r_px: float,
-                                  pulse: float = 0.0,
-                                  pulse_intensity: float = 1.0,
-                                  pixel_size: int = 1) -> np.ndarray:
-        H, W = frame_tb.shape[:2]
-        cx, cy = W / 2.0, H / 2.0
-        r = max(1, int(r_px * (1.0 + 0.10 * pulse * pulse_intensity)))
-        diam = r * 2
-        resized = center_pil.resize((diam, diam), Image.LANCZOS)
-        if pixel_size > 1:
-            small_d = max(1, diam // pixel_size)
-            resized = resized.resize((small_d, small_d), Image.NEAREST).resize((diam, diam), Image.NEAREST)
-        OVR = 4
-        mask_big = Image.new("L", (diam * OVR, diam * OVR), 0)
-        draw = ImageDraw.Draw(mask_big)
-        draw.ellipse([0, 0, diam * OVR - 1, diam * OVR - 1], fill=255)
-        del draw
-        mask = mask_big.resize((diam, diam), Image.LANCZOS)
-        resized.putalpha(mask)
-        base = Image.fromarray(frame_tb, "RGB").convert("RGBA")
-        base.paste(resized, (int(cx - r), int(cy - r)), resized)
-        return np.array(base.convert("RGB"))
-
-    def _draw_ring_glow(self, frame_tb: np.ndarray,
-                        r_px: float,
-                        palette: list,
-                        pulse: float = 0.0,
-                        pulse_intensity: float = 1.0) -> np.ndarray:
-        H, W = frame_tb.shape[:2]
-        cx, cy = int(W / 2), int(H / 2)
-        r = max(4, int(r_px * (1.0 + 0.10 * pulse * pulse_intensity)))
-
-        pal0 = tuple(int(c * 255) for c in palette[0][:3])
-        pal1 = tuple(int(c * 255) for c in palette[1][:3])
-
-        OVR     = 2
-        max_ext = 7 * max(1, r // 35)
-        pad     = max_ext + 4
-        patch_r = r + pad
-        ps      = patch_r * 2 * OVR
-        pc      = patch_r * OVR
-        r2      = r * OVR
-        rg2     = int(r * 1.5) * OVR
-
-        patch = Image.new("RGBA", (ps, ps), (0, 0, 0, 0))
-        draw  = ImageDraw.Draw(patch)
-
-        draw.ellipse([pc - rg2, pc - rg2, pc + rg2, pc + rg2], fill=(*pal0, 20))
-        draw.ellipse([pc - r2,  pc - r2,  pc + r2,  pc + r2],  fill=(*pal0, 12))
-
-        for i in range(7, 0, -1):
-            extra2 = i * max(1, r // 35) * OVR
-            draw.ellipse(
-                [pc - r2 - extra2, pc - r2 - extra2, pc + r2 + extra2, pc + r2 + extra2],
-                outline=(*pal0, i * 5), width=extra2 + 1,
-            )
-
-        rw2 = max(2, r // 20) * OVR
-        draw.ellipse([pc - r2, pc - r2, pc + r2, pc + r2], outline=(*pal1, 200), width=rw2)
-        draw.ellipse([pc - r2, pc - r2, pc + r2, pc + r2],
-                     outline=(255, 255, 255, 85), width=max(1, rw2 // 2))
-        del draw
-
-        patch_1x = patch.resize((patch_r * 2, patch_r * 2), Image.LANCZOS)
-
-        # Composite over the patch's bounding box only: the overlay is fully transparent
-        # everywhere else, so converting the whole 1920×1080 frame to RGBA and back was
-        # pure overhead. The patch still goes through a transparent RGBA overlay first —
-        # that squares its alpha, and the glow's look depends on it.
-        x0, y0 = cx - patch_r, cy - patch_r
-        side   = patch_r * 2
-        bx0, by0 = max(0, x0), max(0, y0)
-        bx1, by1 = min(W, x0 + side), min(H, y0 + side)
-        base = Image.fromarray(frame_tb, "RGB")
-        if bx0 >= bx1 or by0 >= by1:
-            return np.array(base)
-
-        overlay = Image.new("RGBA", (bx1 - bx0, by1 - by0), (0, 0, 0, 0))
-        overlay.paste(patch_1x, (x0 - bx0, y0 - by0), patch_1x)
-        crop = base.crop((bx0, by0, bx1, by1)).convert("RGBA")
-        base.paste(Image.alpha_composite(crop, overlay).convert("RGB"), (bx0, by0))
-        return np.array(base)
+    def _update_spline(self, st: LayerState, layer: Layer, bars: np.ndarray) -> None:
+        n = max(2, min(int(layer.halo_n_points), _SPLINE_MAX))
+        mode = st.halo_sine if layer.mode == 6 else st.flat_sine
+        deform = mode.compute(bars, n_points=n,
+                              smoothing_decay=layer.halo_smoothing_decay,
+                              sensitivity=layer.sensitivity)
+        data = np.zeros(_SPLINE_MAX, dtype="f4")
+        data[:n] = deform
+        st.spline_tex.write(data.tobytes())
+        st.spline_tex.use(location=4)
+        self.prog["u_spline_tex"].value = 4
+        self.prog["u_spline_n"].value = n
+        self.prog["u_sine_amp"].value = float(layer.halo_amplitude)
+        self.prog["u_sine_gap"].value = float(layer.halo_spline_gap)
+        self.prog["u_sine_glow"].value = int(layer.halo_glow_layers)
+        self.prog["u_sine_fill"].value = float(layer.halo_fill_opacity)
+        self.prog["u_sine_mean"].value = float(deform.mean())
+        self.prog["u_center_pixel"].value = int(layer.halo_pixel_size)
+        self.prog["u_res_y"].value = float(self.height)
 
     def draw_selection_outline(self, layer: Layer) -> None:
         """Preview-only: draw a highlight box around the selected layer."""
@@ -738,6 +622,7 @@ class Renderer:
             self._bg_texture.release()
         if self._center_texture:
             self._center_texture.release()
+        self._bars_tex.release()
         self.vao.release()
         self.composite_vao.release()
         self.bg_vao.release()
