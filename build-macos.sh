@@ -69,7 +69,7 @@ echo "[..] Copie des sources..."
 mkdir -p "$BUILD/src"
 rsync -a --delete \
     --exclude venv --exclude .git --exclude __pycache__ --exclude '.pytest_cache' \
-    --exclude dist --exclude build \
+    --exclude dist --exclude build --exclude wheels-mac12 \
     "$SRC"/ "$BUILD/src"/
 cd "$BUILD/src"
 
@@ -77,8 +77,18 @@ cd "$BUILD/src"
 [ -d venv ] || $RUN "$PY" -m venv venv
 echo "[..] Installation des dependances + PyInstaller (Qt : ca peut etre long)..."
 $RUN venv/bin/pip install --upgrade pip -q
-$RUN venv/bin/pip install -r "$REQ" -q
-$RUN venv/bin/pip install pyinstaller -q
+if [ "$ARCH" = "x86_64" ]; then
+    # pip choisit les wheels selon le macOS de l'HOTE (ex. scipy/numpy en
+    # macosx_14_0 + Accelerate) : on force des wheels marquees macOS 12, sinon
+    # le .app plante au chargement sur Monterey.
+    rm -rf wheels-mac12
+    $RUN venv/bin/pip download -r "$REQ" pyinstaller -q -d wheels-mac12 \
+        --only-binary=:all: --platform macosx_12_0_x86_64 --python-version "$PYREQ"
+    $RUN venv/bin/pip install --no-index --find-links wheels-mac12 --force-reinstall -r "$REQ" pyinstaller -q
+else
+    $RUN venv/bin/pip install -r "$REQ" -q
+    $RUN venv/bin/pip install pyinstaller -q
+fi
 echo "[OK] Environnement de build pret"
 
 # --- PyInstaller : bundle .app ----------------------------------------------
