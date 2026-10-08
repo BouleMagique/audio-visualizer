@@ -14,7 +14,8 @@ A self-contained build with Python, Qt, ModernGL and the shaders all bundled. No
 |----|------|-----|
 | **Linux** | `AudioVisualizer-x86_64.AppImage` | `chmod +x AudioVisualizer-x86_64.AppImage` then double-click or `./AudioVisualizer-x86_64.AppImage` |
 | **Windows** | `AudioVisualizer.exe` | double-click (SmartScreen: *More info → Run anyway*) |
-| **macOS** | *(build from source for now)* | — |
+| **macOS (Apple Silicon)** | `AudioVisualizer-macos-arm64.zip` | unzip, `xattr -dr com.apple.quarantine AudioVisualizer.app`, then right-click → Open |
+| **macOS (Intel, 12+)** | `AudioVisualizer-macos-x86_64.zip` | same as above — built for macOS 12 Monterey (e.g. Mac Pro 2013) |
 
 Grab it from the **[Releases](https://github.com/BouleMagique/audio-visualizer/releases)** page, or build it yourself (below).
 
@@ -29,7 +30,7 @@ bash build-linux.sh      # -> dist/AudioVisualizer-x86_64.AppImage
 
 Needs Python 3.10+. The script creates an isolated venv, installs the deps + PyInstaller, bundles the GLSL shaders, and wraps everything with `appimagetool` (downloaded automatically on first run). Build happens in a local cache dir (`~/.cache/audio-visualizer-build`) to avoid PyInstaller issues on network mounts.
 
-*Windows (`.exe`) and macOS (`.app`) build scripts follow the same PyInstaller approach, per-OS (PyInstaller does not cross-compile). macOS needs Python 3.10+ — the system Python 3.9 is too old for PySide6.*
+*Windows (`.exe`) and macOS (`.app`) build scripts follow the same PyInstaller approach, per-OS (PyInstaller does not cross-compile). macOS: `bash build-macos.sh` (native arch) or `TARGET_ARCH=x86_64 bash build-macos.sh` for an Intel/macOS 12 build from Apple Silicon (Rosetta, PySide6 6.9.3); Python 3.12 is fetched via uv. The first launch asks for microphone access — needed to read BlackHole in live mode.*
 
 ### 🐍 From source (developer mode)
 
