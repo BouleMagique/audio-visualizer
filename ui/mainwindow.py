@@ -675,6 +675,12 @@ class MainWindow(QMainWindow):
             au_f, "Ampleur (×0.01)", 0, 100, int(AUTO_AMOUNT * 100), self._on_params_changed)
         self._row_auto_pause = self._make_slider_row(
             au_f, "Pause (×0.01)", 0, 100, 0, self._on_params_changed)
+        self._chk_auto_wrap = QCheckBox("Tours (boucle au lieu d'aller-retour)")
+        self._chk_auto_wrap.setToolTip(
+            "Chaque paramètre auto parcourt toute sa plage min→max puis reboucle.\n"
+            "Sans couture pour Rotation / Teinte. Ampleur et Pause ignorées.")
+        self._chk_auto_wrap.stateChanged.connect(self._on_params_changed)
+        au_f.addRow("", self._chk_auto_wrap)
         pl.addWidget(self._auto_group)
 
         # ── Psy global (modes 12-15) ──
@@ -1153,6 +1159,7 @@ class MainWindow(QMainWindow):
         self._sl(self._row_auto_speed).setValue(int(layer.auto_speed * 100))
         self._sl(self._row_auto_amount).setValue(int(layer.auto_amount * 100))
         self._sl(self._row_auto_pause).setValue(int(layer.auto_pause * 100))
+        self._chk_auto_wrap.setChecked(layer.auto_wrap)
         for _e in self._auto_rows:                 # reflect this layer's active sweeps
             _on = _e.get("field") in layer.auto
             _e["btn"].setChecked(_on)
@@ -1267,6 +1274,7 @@ class MainWindow(QMainWindow):
         layer.auto_speed = self._sl(self._row_auto_speed).value() / 100
         layer.auto_amount = self._sl(self._row_auto_amount).value() / 100
         layer.auto_pause = self._sl(self._row_auto_pause).value() / 100
+        layer.auto_wrap = self._chk_auto_wrap.isChecked()
         layer.mirror = self._chk_mirror.isChecked()
         layer.halo_r_base = self._sl(self._row_hs_r_base).value() / 100
         layer.halo_amplitude = self._sl(self._row_hs_amplitude).value() / 100

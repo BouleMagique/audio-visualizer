@@ -54,12 +54,21 @@ def apply_auto_lfo(layer, t: float) -> None:
     field oscillates around the MIDPOINT of its range, so amount = 1 covers the full
     min↔max independent of the field's own range. `pause` soft-clips the sine toward a
     square, dwelling at the extremes (0 = clean continuous sweep).
+    `auto_wrap` = "tours": instead of a back-and-forth sine, each field ramps lo→hi
+    over the full range then loops back to lo (seamless for cyclic fields such as
+    rotation / hue; amount and pause are ignored in this mode).
     """
     if not layer.auto:
         return
     speed, amount, pause = layer.auto_speed, layer.auto_amount, layer.auto_pause
     for field_name, spec in layer.auto.items():
         lo, hi, phase = spec
+        if layer.auto_wrap:
+            u = ((t * speed * 2.0 + phase) / (2.0 * math.pi)) % 1.0
+            v = lo + u * (hi - lo)
+            cur = getattr(layer, field_name, None)
+            setattr(layer, field_name, int(v) if isinstance(cur, int) else v)
+            continue
         s = math.sin(t * speed * 2.0 + phase)
         if pause > 0.001:
             g = pause * 6.0
@@ -106,6 +115,7 @@ class Layer:
     auto_speed: float = AUTO_SPEED
     auto_amount: float = AUTO_AMOUNT
     auto_pause: float = 0.0
+    auto_wrap: bool = False            # LFO "tours": ramp lo→hi then loop
     pal_mode: int = 0                  # 0 = amplitude, 1 = fréquence
     mirror: bool = False
     flash: bool = False
