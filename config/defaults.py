@@ -71,6 +71,7 @@ VIZ_TYPES = {
     "Julia Morph": 13,
     "Alien Eye": 14,
     "Swamp": 15,
+    "Halo Peaks": 16,
 }
 
 # Modes proposés dans le sélecteur, dans l'ordre d'affichage.
@@ -78,6 +79,7 @@ VIZ_TYPES = {
 # mais ne sont plus sélectionnables depuis l'UI.
 VIZ_TYPES_VISIBLE = (
     "Halo Sine",
+    "Halo Peaks",
     "Halo",
     "Radial",
     "Linéaire",
@@ -102,6 +104,16 @@ HALO_SINE_SMOOTHING_DECAY = 0.80   # per-point EMA decay (fast attack, slow rele
 HALO_SINE_FILL_OPACITY    = 0.0    # interior fill opacity (0 = no fill)
 HALO_SINE_SPLINE_GAP      = 1.4    # spline base radius as multiple of center circle radius
 HALO_SINE_PIXEL_SIZE      = 1      # center image pixelation block size (1 = off)
+
+# Halo Peaks (mode 16): round halo where only the dominant spectral peaks raise
+# isolated bumps (a gliding bass = one wave travelling along the rim).
+PEAK_CUT_DB    = 14.0   # cut-off: keep only what is within N dB of the loudest
+PEAK_MAX       = 5      # max simultaneous bumps
+PEAK_WIDTH     = 0.022  # bump half-width, fraction of the frequency span
+PEAK_RELEASE   = 0.15   # s, how long a bump takes to fall back
+PEAK_FREQ_MIN  = 30     # Hz
+PEAK_FREQ_MAX  = 12000  # Hz
+PEAK_MIRROR    = True   # bass on top, mirrored left/right (like Halo Sine)
 
 # Tunnel Arcade mode defaults
 TUNNEL_SIDES      = 8     # polygon sides (4 / 6 / 8 / 12)

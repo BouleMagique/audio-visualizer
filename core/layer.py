@@ -17,6 +17,7 @@ from config.defaults import (
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
+    PEAK_CUT_DB, PEAK_MAX, PEAK_WIDTH, PEAK_RELEASE, PEAK_FREQ_MIN, PEAK_FREQ_MAX, PEAK_MIRROR,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
     TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
@@ -133,6 +134,15 @@ class Layer:
     halo_fill_opacity: float = HALO_SINE_FILL_OPACITY
     halo_spline_gap: float = HALO_SINE_SPLINE_GAP
     halo_pixel_size: int = HALO_SINE_PIXEL_SIZE
+
+    # ── Halo Peaks (mode 16) ──
+    peak_cut_db: float = PEAK_CUT_DB
+    peak_max: int = PEAK_MAX
+    peak_width: float = PEAK_WIDTH
+    peak_release: float = PEAK_RELEASE
+    peak_freq_min: int = PEAK_FREQ_MIN
+    peak_freq_max: int = PEAK_FREQ_MAX
+    peak_mirror: bool = PEAK_MIRROR
 
     # ── Tunnel Arcade ──
     tunnel_sides: int = TUNNEL_SIDES

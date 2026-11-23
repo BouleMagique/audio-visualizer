@@ -10,6 +10,7 @@ from config.defaults import (
 )
 from core.layer import Layer, BGLayer, LayerManager, BLEND_ADDITIVE, apply_auto_lfo
 from render.modes import HaloSineMode, FlatSineMode
+from core.fft import SPEC_FREQS
 
 
 SHADER_DIR = Path(__file__).parent / "shaders"
@@ -81,6 +82,10 @@ class LayerState:
         self.bass_hist2_tex.repeat_y = False
 
         self.halo_sine = HaloSineMode()
+        # Halo Peaks (mode 16) state
+        self.pk_curve: np.ndarray | None = None
+        self.pk_gpeak: float = -60.0
+        self.pk_t: float = 0.0
         self.flat_sine = FlatSineMode()
         # Spline control values for modes 6/9 (u_spline_tex), read with texelFetch
         self.spline_tex = ctx.texture((_SPLINE_MAX, 1), 1, dtype='f4')
@@ -270,11 +275,14 @@ class Renderer:
         # Auto-LFO: sweep flagged fields for this frame (drives preview AND export).
         apply_auto_lfo(layer, time)
 
+        spec_db = getattr(bars, "spec_db", None)
+
         # Mute: the layer keeps running (time, LFO, live shockwaves) but hears
         # silence → no bars, no pulse, no kicks.
         if layer.muted:
             bars = np.zeros_like(bars)
             pulse = 0.0
+            spec_db = None
 
         palette = layer.palette if layer.palette else _DEFAULT_PALETTE
         viz_type = layer.mode
@@ -336,7 +344,8 @@ class Renderer:
         self.prog["u_bar_width"].value = float(BAR_WIDTH)
         self.prog["u_aspect"].value = float(self.width / self.height)
         self.prog["u_sensitivity"].value = float(layer.sensitivity)
-        self.prog["u_viz_type"].value = int(viz_type)
+        # Halo Peaks reuses the Halo Sine drawing (only the curve differs)
+        self.prog["u_viz_type"].value = 6 if viz_type == 16 else int(viz_type)
         self.prog["u_rotation"].value = float(layer.rotation)
         self.prog["u_symmetry"].value = int(layer.symmetry)
         self.prog["u_polar"].value = float(layer.polar)
@@ -430,6 +439,8 @@ class Renderer:
         # Spline modes: CPU analysis → control values, drawn by the shader
         if viz_type in (6, 9):
             self._update_spline(st, layer, lbars)
+        elif viz_type == 16:
+            self._update_peaks(st, layer, spec_db, time)
 
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
@@ -587,6 +598,56 @@ class Renderer:
         self.prog["u_tunnel_kick_zoom"].value = float(layer.tunnel_kick_zoom)
         self.prog["u_tunnel_chroma"].value = float(layer.tunnel_chroma)
         self.prog["u_tunnel_bass_speed"].value = float(layer.tunnel_bass_speed)
+
+    def _update_peaks(self, st: LayerState, layer: Layer, spec_db, time: float) -> None:
+        """Halo Peaks: cut-off + peak picking on the fine log spectrum → isolated
+        Gaussian bumps on an otherwise perfectly round halo."""
+        dt = time - st.pk_t
+        dt = 1.0 / 60.0 if (dt < 0.0 or dt > 0.25) else dt
+        st.pk_t = time
+        fmin, fmax = sorted((float(layer.peak_freq_min), float(layer.peak_freq_max)))
+        sel = (SPEC_FREQS >= fmin) & (SPEC_FREQS <= max(fmax, fmin * 1.5))
+        npts = int(sel.sum())
+        if st.pk_curve is None or len(st.pk_curve) != npts:
+            st.pk_curve = np.zeros(npts, np.float32)
+        pos = np.linspace(0.0, 1.0, npts)
+        target = np.zeros(npts, np.float32)
+        if spec_db is not None and npts > 2:
+            db = spec_db[sel]
+            cut = max(float(layer.peak_cut_db), 1.0)
+            st.pk_gpeak = max(float(db.max()), st.pk_gpeak - 4.0 * dt)
+            thr = max(max(float(db.max()), st.pk_gpeak - 6.0) - cut, -75.0)
+            lm = np.where((db[1:-1] > db[:-2]) & (db[1:-1] >= db[2:]) & (db[1:-1] > thr))[0] + 1
+            lm = lm[np.argsort(db[lm])[::-1]][:max(1, int(layer.peak_max))]
+            w = max(float(layer.peak_width), 1e-3)
+            for i in lm:
+                h = ((db[i] - thr) / cut) ** 1.3 * layer.sensitivity
+                target = np.maximum(target, h * np.exp(-0.5 * ((pos - pos[i]) / w) ** 2))
+        if dt > 0.0:
+            up = 1.0 - np.exp(-dt / 0.02)
+            down = 1.0 - np.exp(-dt / max(float(layer.peak_release), 0.01))
+            a = np.where(target > st.pk_curve, up, down)
+            st.pk_curve = st.pk_curve + (target - st.pk_curve) * a
+
+        n = _SPLINE_MAX
+        src = np.arange(npts)
+        if layer.peak_mirror:
+            half = np.interp(np.linspace(0, npts - 1, n // 2), src, st.pk_curve)
+            deform = np.concatenate([half, half[::-1]])
+        else:
+            deform = np.interp(np.linspace(0, npts - 1, n), src, st.pk_curve)
+        data = deform.astype("f4")
+        st.spline_tex.write(data.tobytes())
+        st.spline_tex.use(location=4)
+        self.prog["u_spline_tex"].value = 4
+        self.prog["u_spline_n"].value = n
+        self.prog["u_sine_amp"].value = float(layer.halo_amplitude)
+        self.prog["u_sine_gap"].value = float(layer.halo_spline_gap)
+        self.prog["u_sine_glow"].value = int(layer.halo_glow_layers)
+        self.prog["u_sine_fill"].value = float(layer.halo_fill_opacity)
+        self.prog["u_sine_mean"].value = float(deform.mean())
+        self.prog["u_center_pixel"].value = int(layer.halo_pixel_size)
+        self.prog["u_res_y"].value = float(self.height)
 
     def _update_spline(self, st: LayerState, layer: Layer, bars: np.ndarray) -> None:
         n = max(2, min(int(layer.halo_n_points), _SPLINE_MAX))
