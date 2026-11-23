@@ -115,6 +115,7 @@ PEAK_FREQ_MIN  = 30     # Hz
 PEAK_FREQ_MAX  = 12000  # Hz
 PEAK_GLIDE     = 0.04   # s, how fast a bump slides to its new frequency
 PEAK_HOLD      = 0.08   # s a rival freq must dominate before the bump moves to it
+PEAK_MERGE     = 5.0    # bumps closer than N × width fuse into one wave
 PEAK_TILT      = 0.0    # dB/oct weighting (negative = favour bass, positive = treble)
 PEAK_MIRROR    = True   # bass on top, mirrored left/right (like Halo Sine)
 

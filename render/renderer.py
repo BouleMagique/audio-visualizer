@@ -624,6 +624,7 @@ class Renderer:
         tracks = st.pk_tracks
 
         cands = []
+        merge = float(layer.peak_merge) * w              # fusion distance
         cut = max(float(layer.peak_cut_db), 1.0)
         if spec_db is not None and npts > 4:
             # spectral tilt: spec_db carries +3 dB/oct; re-tilt to the layer's choice
@@ -638,13 +639,25 @@ class Renderer:
             lm = np.where((dbs[1:-1] > dbs[:-2]) & (dbs[1:-1] >= dbs[2:])
                           & (dbs[1:-1] > thr_off))[0] + 1
             lm = lm[np.argsort(dbs[lm])[::-1]]
-            # non-max suppression: peaks closer than ~2.5 bump widths merge
-            min_sep = 2.5 * w
+            # Clustering: peaks within `merge` of a stronger one join its group →
+            # the group becomes ONE normal-width bump at its energy centre (weighted
+            # toward the loudest member) and takes a single slot. As the energy
+            # shifts inside the group, that centre moves → the bump SWEEPS
+            # smoothly instead of 3 bumps bouncing side by side.
+            groups = []                                   # [lead_p, [(p, h)], strong]
             for i in lm:
                 p = pos[i]
-                if all(abs(p - c[0]) >= min_sep for c in cands):
-                    h = max(0.0, (dbs[i] - thr_off) / (cut + 4.0)) ** 1.3 * layer.sensitivity
-                    cands.append((p, h, dbs[i] > thr_on))
+                h = max(0.0, (dbs[i] - thr_off) / (cut + 4.0)) ** 1.3 * layer.sensitivity
+                g = next((g for g in groups if abs(p - g[0]) < merge), None)
+                if g is None:
+                    groups.append([p, [(p, h)], dbs[i] > thr_on])
+                else:
+                    g[1].append((p, h))
+            for _, mem, strong in groups:
+                ps = np.array([m[0] for m in mem]); hs = np.array([m[1] for m in mem])
+                wt = hs ** 2 + 1e-9
+                c = float((ps * wt).sum() / wt.sum())
+                cands.append((c, float(hs.max()), strong, w))
 
         # match candidates (strongest first) to the nearest unmatched track
         max_jump = max(0.08, 3.0 * w)
@@ -652,7 +665,7 @@ class Renderer:
         challenged = set()
         # bumps above the current max (slider lowered) are dropped
         del tracks[max(1, int(layer.peak_max)):]
-        for p, h, strong in cands:
+        for p, h, strong, cw in cands:
             best, bd = None, max_jump
             for ti, t in enumerate(tracks):
                 if ti not in used and abs(t["pos"] - p) < bd:
@@ -660,11 +673,13 @@ class Renderer:
             if best is not None:
                 used.add(best)
                 tracks[best]["tpos"], tracks[best]["tamp"] = p, h
+                tracks[best]["twid"] = cw
                 continue
             if not strong:
                 continue
             if len(tracks) < max(1, int(layer.peak_max)):
-                tracks.append({"pos": p, "tpos": p, "amp": 0.0, "tamp": h, "chal": 0.0})
+                tracks.append({"pos": p, "tpos": p, "amp": 0.0, "tamp": h, "chal": 0.0,
+                               "wid": cw, "twid": cw})
                 used.add(len(tracks) - 1)
                 continue
             # Slots full: never spawn a 2nd bump — the weakest free bump MOVES here,
@@ -685,6 +700,7 @@ class Renderer:
                         t["pos"] = p
                         t["amp"] = min(t["amp"], 0.0)
                     t["tpos"], t["tamp"], t["chal"] = p, h, 0.0
+                    t["twid"] = cw
                     used.add(ti)
         for ti, t in enumerate(tracks):
             if ti not in challenged:
@@ -696,14 +712,37 @@ class Renderer:
             kp = 1.0 - np.exp(-dt / max(float(layer.peak_glide), 1e-3))
             up = 1.0 - np.exp(-dt / 0.015)
             down = 1.0 - np.exp(-dt / max(float(layer.peak_release), 0.01))
+            kw = 1.0 - np.exp(-dt / 0.08)
             for t in tracks:
+                t.setdefault("wid", w); t.setdefault("twid", w)
                 t["pos"] += (t["tpos"] - t["pos"]) * kp
                 t["amp"] += (t["tamp"] - t["amp"]) * (up if t["tamp"] > t["amp"] else down)
+                t["wid"] += (t["twid"] - t["wid"]) * kw
             st.pk_tracks = tracks = [t for t in tracks if t["amp"] > 0.004 or t["tamp"] > 0.0]
+        # Track fusion: two bumps that drift within `merge` become one wave.
+        merged = True
+        while merged and len(tracks) > 1:
+            merged = False
+            tracks.sort(key=lambda t: t["pos"])
+            for i in range(len(tracks) - 1):
+                a, b = tracks[i], tracks[i + 1]
+                if abs(b["pos"] - a["pos"]) < merge:
+                    wa, wb = a["amp"] + 1e-6, b["amp"] + 1e-6
+                    c = (a["pos"] * wa + b["pos"] * wb) / (wa + wb)
+                    keep = a if a["amp"] >= b["amp"] else b
+                    # survivor keeps its own position and glides to the centre
+                    keep["tpos"] = c
+                    keep["amp"] = max(a["amp"], b["amp"])
+                    keep["tamp"] = max(a["tamp"], b["tamp"])
+                    tracks.remove(b if keep is a else a)
+                    merged = True
+                    break
+        st.pk_tracks = tracks
 
         curve = np.zeros(npts, np.float32)
         for t in tracks:
-            curve = np.maximum(curve, t["amp"] * np.exp(-0.5 * ((pos - t["pos"]) / w) ** 2))
+            tw = max(t.get("wid", w), 1e-3)
+            curve = np.maximum(curve, t["amp"] * np.exp(-0.5 * ((pos - t["pos"]) / tw) ** 2))
         st.pk_curve = curve
 
         n = _SPLINE_MAX
