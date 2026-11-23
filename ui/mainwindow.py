@@ -52,7 +52,7 @@ FFT_ANALYSIS_BARS_MAX = 512   # raised to this only while a layer asks for > 256
 LIVE_FFT_SIZES = {"Réactif · 1024": 1024, "Équilibré · 2048": 2048, "Précis · 4096": 4096}
 
 _RADIAL_MODES     = {0, 4, 5, 6, 7}
-_ROTATION_MODES   = {0, 4, 5, 6, 7}
+_ROTATION_MODES   = {0, 4, 5, 6, 7, 9}
 _BAR_MODES        = {0, 1, 2, 4, 5, 7}
 _HEIGHT_MODES     = {0, 1, 2, 4, 5, 7}
 _HALO_MODES       = {4, 5, 6, 7, 8}

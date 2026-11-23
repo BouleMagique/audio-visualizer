@@ -652,8 +652,16 @@ void main() {
 
     // ── Sine Plat — horizontal spline mirrored top/bottom ──
     } else if (u_viz_type == 9) {
+        // Rotation around the centre (aspect-corrected so the line stays straight).
+        // The full spectrum is stretched over the screen's extent along the
+        // rotated direction (width at 0°, height at 90°, diagonal in between).
+        vec2 rq = (v_uv - 0.5) * vec2(u_aspect, 1.0);
+        float rc = cos(u_rotation), rs = sin(u_rotation);
+        rq = mat2(rc, rs, -rs, rc) * rq;
+        float span = min(u_aspect / max(abs(rc), 1e-3), 1.0 / max(abs(rs), 1e-3));
+        vec2 v_uv = vec2(rq.x / span, rq.y) + 0.5;
         float n    = float(u_spline_n);
-        float w_px = u_res_y * u_aspect;
+        float w_px = u_res_y * span;
         float s    = clamp(v_uv.x, 0.0, 1.0) * (n - 1.0);
         vec2  dv   = spline_eval(s, false) * (u_sine_amp * u_res_y);   // px, px / index
         float slope = dv.y * (n - 1.0) / w_px;                          // px / px
