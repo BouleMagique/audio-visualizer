@@ -114,6 +114,7 @@ PEAK_RELEASE   = 0.15   # s, how long a bump takes to fall back
 PEAK_FREQ_MIN  = 30     # Hz
 PEAK_FREQ_MAX  = 12000  # Hz
 PEAK_GLIDE     = 0.04   # s, how fast a bump slides to its new frequency
+PEAK_HOLD      = 0.08   # s a rival freq must dominate before the bump moves to it
 PEAK_TILT      = 0.0    # dB/oct weighting (negative = favour bass, positive = treble)
 PEAK_MIRROR    = True   # bass on top, mirrored left/right (like Halo Sine)
 

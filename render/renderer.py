@@ -649,6 +649,9 @@ class Renderer:
         # match candidates (strongest first) to the nearest unmatched track
         max_jump = max(0.08, 3.0 * w)
         used = set()
+        challenged = set()
+        # bumps above the current max (slider lowered) are dropped
+        del tracks[max(1, int(layer.peak_max)):]
         for p, h, strong in cands:
             best, bd = None, max_jump
             for ti, t in enumerate(tracks):
@@ -657,10 +660,35 @@ class Renderer:
             if best is not None:
                 used.add(best)
                 tracks[best]["tpos"], tracks[best]["tamp"] = p, h
-            elif strong and len(tracks) < max(1, int(layer.peak_max)):
-                tracks.append({"pos": p, "tpos": p, "amp": 0.0, "tamp": h})
+                continue
+            if not strong:
+                continue
+            if len(tracks) < max(1, int(layer.peak_max)):
+                tracks.append({"pos": p, "tpos": p, "amp": 0.0, "tamp": h, "chal": 0.0})
                 used.add(len(tracks) - 1)
+                continue
+            # Slots full: never spawn a 2nd bump — the weakest free bump MOVES here,
+            # but only if the challenger clearly dominates for `peak_hold` seconds
+            # (or the bump has already faded). Kills the flicker between rival freqs.
+            free = [ti for ti in range(len(tracks)) if ti not in used]
+            if not free:
+                continue
+            ti = min(free, key=lambda j: tracks[j]["tamp"] if j not in challenged else 1e9)
+            if ti in challenged:
+                continue
+            t = tracks[ti]
+            challenged.add(ti)
+            if h > t["tamp"] * 1.25 or t["amp"] < 0.05:
+                t["chal"] = t.get("chal", 0.0) + dt
+                if t["chal"] >= float(layer.peak_hold) or t["amp"] < 0.05:
+                    if abs(t["pos"] - p) > max_jump:      # far move: teleport, re-rise
+                        t["pos"] = p
+                        t["amp"] = min(t["amp"], 0.0)
+                    t["tpos"], t["tamp"], t["chal"] = p, h, 0.0
+                    used.add(ti)
         for ti, t in enumerate(tracks):
+            if ti not in challenged:
+                t["chal"] = 0.0
             if ti not in used:
                 t["tamp"] = 0.0
 
