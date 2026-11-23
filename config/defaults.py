@@ -135,6 +135,11 @@ VOID_ARMS  = 3      # spiral arm count
 # Kaleidoscope symmetry: folds the coordinate plane into N mirror sectors before
 # the mode renders. 1 = off, 2..12 = mandala. Applies to every mode.
 SYMMETRY = 1
+# Polar warp: re-reads each mode in (angle, radius) → straight shapes fold into
+# circles. 0 = off .. 1 = full warp. REPS = copies around the circle. LOG = tunnel.
+POLAR = 0.0
+POLAR_REPS = 1
+POLAR_LOG = False
 # Per-band gains on the energy FED TO THE EFFECT ONLY (u_bass/u_mid/u_high).
 # These NEVER touch the played-back audio — only the reactivity computation.
 BAND_GAIN_LOW  = 1.0

@@ -23,7 +23,7 @@ from config.defaults import (
     TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     NUKE_KICK_THRESHOLD, NUKE_SPEED, NUKE_LIFE, NUKE_WIDTH, NUKE_FLASH, NUKE_BG,
     VOID_SPEED, VOID_PULL, VOID_RAYS, VOID_ARMS,
-    SYMMETRY, BAND_GAIN_LOW, BAND_GAIN_MID, BAND_GAIN_HIGH, HUE,
+    SYMMETRY, POLAR, POLAR_REPS, POLAR_LOG, BAND_GAIN_LOW, BAND_GAIN_MID, BAND_GAIN_HIGH, HUE,
     AUTO_SPEED, AUTO_AMOUNT,
     PSY_SPEED, PSY_SAT,
     MYC_GROWTH, MYC_DENSITY, MYC_WARP, MYC_BRANCH, MYC_SPORE,
@@ -94,6 +94,9 @@ class Layer:
     rotation: float = 0.0              # radians
     hue: float = HUE                   # global hue shift 0-1, all modes
     symmetry: int = SYMMETRY           # kaleidoscope sectors (1 = off), all modes
+    polar: float = POLAR               # polar warp amount 0-1, all modes
+    polar_reps: int = POLAR_REPS       # angular repetitions for polar warp
+    polar_log: bool = POLAR_LOG        # log-polar tunnel
     band_gain_low: float = BAND_GAIN_LOW    # effect-only gain on u_bass
     band_gain_mid: float = BAND_GAIN_MID    # effect-only gain on u_mid
     band_gain_high: float = BAND_GAIN_HIGH  # effect-only gain on u_high

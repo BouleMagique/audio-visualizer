@@ -36,7 +36,7 @@ from config.defaults import (
     TUNNEL_KICK_THRESHOLD, TUNNEL_KICK_COOLDOWN,
     NUKE_KICK_THRESHOLD, NUKE_SPEED, NUKE_LIFE, NUKE_WIDTH, NUKE_FLASH, NUKE_BG,
     VOID_SPEED, VOID_PULL, VOID_RAYS, VOID_ARMS,
-    SYMMETRY, BAND_GAIN_LOW, BAND_GAIN_MID, BAND_GAIN_HIGH, HUE,
+    SYMMETRY, POLAR, POLAR_REPS, POLAR_LOG, BAND_GAIN_LOW, BAND_GAIN_MID, BAND_GAIN_HIGH, HUE,
     PSY_SPEED, PSY_SAT, AUTO_SPEED, AUTO_AMOUNT,
     MYC_GROWTH, MYC_DENSITY, MYC_WARP, MYC_BRANCH, MYC_SPORE,
     JUL_ZOOM, JUL_BREATHE, JUL_GLOW, JUL_ROTATE, JUL_MORPH, JUL_INVERT,
@@ -524,6 +524,14 @@ class MainWindow(QMainWindow):
             pf, "Rotation (°)", 0, 360, 0, self._on_params_changed, auto=True)
         self._row_symmetry = self._make_slider_row(
             pf, "Symétrie (1=off)", 1, 12, SYMMETRY, self._on_params_changed, auto=True)
+        self._row_polar = self._make_slider_row(
+            pf, "Polaire (×0.01)", 0, 100, int(POLAR * 100), self._on_params_changed, auto=True)
+        self._row_polar_reps = self._make_slider_row(
+            pf, "Polaire répét.", 1, 8, POLAR_REPS, self._on_params_changed, auto=True)
+        self._chk_polar_log = QCheckBox("Polaire log (tunnel infini)")
+        self._chk_polar_log.setChecked(POLAR_LOG)
+        self._chk_polar_log.stateChanged.connect(self._on_params_changed)
+        pf.addRow("", self._chk_polar_log)
         self._row_hue = self._make_slider_row(
             pf, "Teinte (×0.01)", 0, 100, int(HUE * 100), self._on_params_changed, auto=True)
         self._chk_mirror = QCheckBox("Miroir (½ cercle = spectre entier)")
@@ -846,6 +854,8 @@ class MainWindow(QMainWindow):
             (self._row_opacity,    "opacity",        0.0, 1.0),
             (self._row_rotation,   "rotation",       0.0, 2.0 * math.pi),
             (self._row_symmetry,   "symmetry",       1,   12),
+            (self._row_polar,      "polar",          0.0, 1.0),
+            (self._row_polar_reps, "polar_reps",     1,   8),
             (self._row_hue,        "hue",            0.0, 1.0),
             (self._row_flash_intensity, "flash_intensity", 0.01, 1.0),
             (self._row_hs_points,  "halo_n_points",  16,  256),
@@ -1133,6 +1143,9 @@ class MainWindow(QMainWindow):
         self._sl(self._row_sensitivity).setValue(int(layer.sensitivity * 100))
         self._sl(self._row_rotation).setValue(int(math.degrees(layer.rotation)))
         self._sl(self._row_symmetry).setValue(layer.symmetry)
+        self._sl(self._row_polar).setValue(int(layer.polar * 100))
+        self._sl(self._row_polar_reps).setValue(layer.polar_reps)
+        self._chk_polar_log.setChecked(layer.polar_log)
         self._sl(self._row_hue).setValue(int(layer.hue * 100))
         self._sl(self._row_band_low).setValue(int(layer.band_gain_low * 100))
         self._sl(self._row_band_mid).setValue(int(layer.band_gain_mid * 100))
@@ -1244,6 +1257,9 @@ class MainWindow(QMainWindow):
         layer.sensitivity = self._sl(self._row_sensitivity).value() / 100
         layer.rotation = math.radians(self._sl(self._row_rotation).value())
         layer.symmetry = self._sl(self._row_symmetry).value()
+        layer.polar = self._sl(self._row_polar).value() / 100
+        layer.polar_reps = self._sl(self._row_polar_reps).value()
+        layer.polar_log = self._chk_polar_log.isChecked()
         layer.hue = self._sl(self._row_hue).value() / 100
         layer.band_gain_low = self._sl(self._row_band_low).value() / 100
         layer.band_gain_mid = self._sl(self._row_band_mid).value() / 100

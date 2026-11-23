@@ -5,6 +5,9 @@ out vec4 fragColor;
 
 uniform int   u_symmetry;   // kaleidoscope sectors (1 = off), all modes
 uniform float u_hue;        // global hue shift 0-1 (post rotation, all modes)
+uniform float u_polar;      // polar warp amount 0-1 (0 = off), all modes
+uniform int   u_polar_reps; // angular repetitions of the source around the circle
+uniform int   u_polar_log;  // 1 = log-polar (infinite tunnel, scrolls inward)
 
 uniform int   u_num_bars;
 uniform sampler2D u_bars_tex;   // R32F 512×1, bar values (texelFetch)
@@ -126,6 +129,25 @@ vec2 kaleido(vec2 uv, int sym) {
     a = abs(a - seg * 0.5);
     c = vec2(cos(a), sin(a)) * r;
     return c / vec2(u_aspect, 1.0) + 0.5;
+}
+
+// ── Polar warp (global) ───────────────────────────────────────────
+// Reads the mode's uv plane in (angle, radius) instead of (x, y): straight things
+// wrap into circles. Both axes are triangle-mirrored so there is no seam at 0/360°
+// and no hard edge outward. Log mode: radius → log(r), scrolling over time + kicks
+// → endless Droste-like tunnel. u_polar morphs between identity and the warp.
+float triWave(float t) { return 1.0 - abs(mod(t, 2.0) - 1.0); }
+vec2 polarWarp(vec2 uv) {
+    if (u_polar <= 0.0) return uv;
+    vec2 c = (uv - 0.5) * vec2(u_aspect, 1.0);
+    float r = length(c);
+    float a = atan(c.y, c.x) / 6.28318530718 + 0.5;          // 0..1
+    float x = triWave(a * 2.0 * float(max(u_polar_reps, 1)));
+    float rr = (u_polar_log == 1)
+        ? (log(r + 1e-4) * 0.8 - u_time * 0.25 - u_kick_accum * 0.6)
+        : r * 2.0;
+    vec2 p = vec2(x, triWave(rr));
+    return mix(uv, p, u_polar);
 }
 
 // Hue rotation around the grey axis (Rodrigues) — for RGB-authored modes that
@@ -296,7 +318,7 @@ int bar_index_x(float uv_x) {
 
 // ────────────────────────────────────────────────────────────────
 void main() {
-    vec2 v_uv = kaleido(v_uv0, u_symmetry);
+    vec2 v_uv = polarWarp(kaleido(v_uv0, u_symmetry));
     vec2 bg_uv = v_uv;
     if (u_bg_pulse_enabled == 1 && u_has_bg == 1) {
         float zoom = 1.0 + u_pulse * u_pulse_intensity * u_bg_pulse_intensity * 0.10;
