@@ -378,7 +378,11 @@ class MainWindow(QMainWindow):
         self._btn_layer_vis.clicked.connect(self._toggle_selected_visible)
         self._btn_layer_solo = QPushButton("S")
         self._btn_layer_solo.clicked.connect(self._toggle_selected_solo)
-        for b in (btn_add, btn_del, self._btn_layer_vis, self._btn_layer_solo):
+        self._btn_layer_mute = QPushButton("🔇")
+        self._btn_layer_mute.setToolTip("Mute : le calque tourne mais n'entend plus la musique")
+        self._btn_layer_mute.clicked.connect(self._toggle_selected_muted)
+        for b in (btn_add, btn_del, self._btn_layer_vis, self._btn_layer_solo,
+                  self._btn_layer_mute):
             b.setFixedWidth(44)
             lbtns.addWidget(b)
         lbtns.addStretch()
@@ -932,7 +936,8 @@ class MainWindow(QMainWindow):
     def _layer_item_label(self, layer: Layer) -> str:
         vis  = "👁" if layer.visible else "🚫"
         solo = " ⓢ" if layer.solo else ""
-        return f"{vis} {layer.name}{solo}"
+        mute = " 🔇" if layer.muted else ""
+        return f"{vis} {layer.name}{solo}{mute}"
 
     def _refresh_layer_list(self):
         self._loading = True
@@ -999,6 +1004,12 @@ class MainWindow(QMainWindow):
         layer = self._lm.selected()
         if layer:
             layer.visible = not layer.visible
+            self._refresh_selected_item_label()
+
+    def _toggle_selected_muted(self):
+        layer = self._lm.selected()
+        if layer:
+            layer.muted = not layer.muted
             self._refresh_selected_item_label()
 
     def _toggle_selected_solo(self):

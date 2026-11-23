@@ -93,6 +93,7 @@ class Layer:
     opacity: float = 1.0               # 0.0 → 1.0
     blend_mode: str = BLEND_ADDITIVE
     visible: bool = True
+    muted: bool = False                # keeps animating but ignores the audio
     solo: bool = False
 
     # ── Generic viz params ──

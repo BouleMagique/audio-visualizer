@@ -270,6 +270,12 @@ class Renderer:
         # Auto-LFO: sweep flagged fields for this frame (drives preview AND export).
         apply_auto_lfo(layer, time)
 
+        # Mute: the layer keeps running (time, LFO, live shockwaves) but hears
+        # silence → no bars, no pulse, no kicks.
+        if layer.muted:
+            bars = np.zeros_like(bars)
+            pulse = 0.0
+
         palette = layer.palette if layer.palette else _DEFAULT_PALETTE
         viz_type = layer.mode
 
