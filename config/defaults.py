@@ -113,6 +113,8 @@ PEAK_WIDTH     = 0.022  # bump half-width, fraction of the frequency span
 PEAK_RELEASE   = 0.15   # s, how long a bump takes to fall back
 PEAK_FREQ_MIN  = 30     # Hz
 PEAK_FREQ_MAX  = 12000  # Hz
+PEAK_GLIDE     = 0.04   # s, how fast a bump slides to its new frequency
+PEAK_TILT      = 0.0    # dB/oct weighting (negative = favour bass, positive = treble)
 PEAK_MIRROR    = True   # bass on top, mirrored left/right (like Halo Sine)
 
 # Tunnel Arcade mode defaults

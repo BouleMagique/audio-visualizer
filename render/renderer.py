@@ -84,6 +84,7 @@ class LayerState:
         self.halo_sine = HaloSineMode()
         # Halo Peaks (mode 16) state
         self.pk_curve: np.ndarray | None = None
+        self.pk_tracks: list = []
         self.pk_gpeak: float = -60.0
         self.pk_t: float = 0.0
         self.flat_sine = FlatSineMode()
@@ -600,8 +601,15 @@ class Renderer:
         self.prog["u_tunnel_bass_speed"].value = float(layer.tunnel_bass_speed)
 
     def _update_peaks(self, st: LayerState, layer: Layer, spec_db, time: float) -> None:
-        """Halo Peaks: cut-off + peak picking on the fine log spectrum → isolated
-        Gaussian bumps on an otherwise perfectly round halo."""
+        """Halo Peaks: isolated Gaussian bumps on a round halo, one per dominant peak.
+
+        Peaks are TRACKED across frames instead of re-picked from scratch: each
+        candidate is matched to the nearest existing bump, whose position then
+        glides toward it (short time constant) → bumps stay whole and slide along
+        the rim instead of popping in/out at slightly different spots. Hysteresis
+        on the cut-off (on/off thresholds) and a threshold that follows the song's
+        slow peak (not each frame's max) stop flicker without adding trail.
+        """
         dt = time - st.pk_t
         dt = 1.0 / 60.0 if (dt < 0.0 or dt > 0.25) else dt
         st.pk_t = time
@@ -610,24 +618,65 @@ class Renderer:
         npts = int(sel.sum())
         if st.pk_curve is None or len(st.pk_curve) != npts:
             st.pk_curve = np.zeros(npts, np.float32)
+            st.pk_tracks = []
         pos = np.linspace(0.0, 1.0, npts)
-        target = np.zeros(npts, np.float32)
-        if spec_db is not None and npts > 2:
-            db = spec_db[sel]
-            cut = max(float(layer.peak_cut_db), 1.0)
-            st.pk_gpeak = max(float(db.max()), st.pk_gpeak - 4.0 * dt)
-            thr = max(max(float(db.max()), st.pk_gpeak - 6.0) - cut, -75.0)
-            lm = np.where((db[1:-1] > db[:-2]) & (db[1:-1] >= db[2:]) & (db[1:-1] > thr))[0] + 1
-            lm = lm[np.argsort(db[lm])[::-1]][:max(1, int(layer.peak_max))]
-            w = max(float(layer.peak_width), 1e-3)
+        w = max(float(layer.peak_width), 1e-3)
+        tracks = st.pk_tracks
+
+        cands = []
+        cut = max(float(layer.peak_cut_db), 1.0)
+        if spec_db is not None and npts > 4:
+            # spectral tilt: spec_db carries +3 dB/oct; re-tilt to the layer's choice
+            db = spec_db[sel] + (float(layer.peak_tilt) - 3.0) * np.log2(SPEC_FREQS[sel] / 1000.0)
+            # light smoothing along frequency for detection → one maximum per hump
+            k = np.exp(-0.5 * (np.arange(-6, 7) / 2.5) ** 2); k /= k.sum()
+            dbs = np.convolve(np.pad(db, 6, mode="edge"), k, mode="valid")
+            # threshold follows the song's slow peak (fast up, 3 dB/s down)
+            st.pk_gpeak = max(float(dbs.max()), st.pk_gpeak - 3.0 * dt)
+            thr_on = max(st.pk_gpeak - cut, -75.0)
+            thr_off = thr_on - 4.0                      # hysteresis
+            lm = np.where((dbs[1:-1] > dbs[:-2]) & (dbs[1:-1] >= dbs[2:])
+                          & (dbs[1:-1] > thr_off))[0] + 1
+            lm = lm[np.argsort(dbs[lm])[::-1]]
+            # non-max suppression: peaks closer than ~2.5 bump widths merge
+            min_sep = 2.5 * w
             for i in lm:
-                h = ((db[i] - thr) / cut) ** 1.3 * layer.sensitivity
-                target = np.maximum(target, h * np.exp(-0.5 * ((pos - pos[i]) / w) ** 2))
+                p = pos[i]
+                if all(abs(p - c[0]) >= min_sep for c in cands):
+                    h = max(0.0, (dbs[i] - thr_off) / (cut + 4.0)) ** 1.3 * layer.sensitivity
+                    cands.append((p, h, dbs[i] > thr_on))
+
+        # match candidates (strongest first) to the nearest unmatched track
+        max_jump = max(0.08, 3.0 * w)
+        used = set()
+        for p, h, strong in cands:
+            best, bd = None, max_jump
+            for ti, t in enumerate(tracks):
+                if ti not in used and abs(t["pos"] - p) < bd:
+                    best, bd = ti, abs(t["pos"] - p)
+            if best is not None:
+                used.add(best)
+                tracks[best]["tpos"], tracks[best]["tamp"] = p, h
+            elif strong and len(tracks) < max(1, int(layer.peak_max)):
+                tracks.append({"pos": p, "tpos": p, "amp": 0.0, "tamp": h})
+                used.add(len(tracks) - 1)
+        for ti, t in enumerate(tracks):
+            if ti not in used:
+                t["tamp"] = 0.0
+
         if dt > 0.0:
-            up = 1.0 - np.exp(-dt / 0.02)
+            kp = 1.0 - np.exp(-dt / max(float(layer.peak_glide), 1e-3))
+            up = 1.0 - np.exp(-dt / 0.015)
             down = 1.0 - np.exp(-dt / max(float(layer.peak_release), 0.01))
-            a = np.where(target > st.pk_curve, up, down)
-            st.pk_curve = st.pk_curve + (target - st.pk_curve) * a
+            for t in tracks:
+                t["pos"] += (t["tpos"] - t["pos"]) * kp
+                t["amp"] += (t["tamp"] - t["amp"]) * (up if t["tamp"] > t["amp"] else down)
+            st.pk_tracks = tracks = [t for t in tracks if t["amp"] > 0.004 or t["tamp"] > 0.0]
+
+        curve = np.zeros(npts, np.float32)
+        for t in tracks:
+            curve = np.maximum(curve, t["amp"] * np.exp(-0.5 * ((pos - t["pos"]) / w) ** 2))
+        st.pk_curve = curve
 
         n = _SPLINE_MAX
         src = np.arange(npts)

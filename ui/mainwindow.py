@@ -31,6 +31,7 @@ from config.defaults import (
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
     PEAK_CUT_DB, PEAK_MAX, PEAK_WIDTH, PEAK_RELEASE, PEAK_FREQ_MIN, PEAK_FREQ_MAX, PEAK_MIRROR,
+    PEAK_GLIDE, PEAK_TILT,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
     TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
@@ -603,6 +604,10 @@ class MainWindow(QMainWindow):
             pkf, "Fréq min (Hz)", 20, 500, PEAK_FREQ_MIN, self._on_params_changed)
         self._row_pk_fmax = self._make_slider_row(
             pkf, "Fréq max (Hz)", 500, 16000, PEAK_FREQ_MAX, self._on_params_changed)
+        self._row_pk_glide = self._make_slider_row(
+            pkf, "Glisse (ms)", 5, 300, int(PEAK_GLIDE * 1000), self._on_params_changed)
+        self._row_pk_tilt = self._make_slider_row(
+            pkf, "Pente aigus (dB/oct)", -9, 6, int(PEAK_TILT), self._on_params_changed)
         self._chk_pk_mirror = QCheckBox("Miroir (basses en haut, symétrique)")
         self._chk_pk_mirror.setChecked(PEAK_MIRROR)
         self._chk_pk_mirror.stateChanged.connect(self._on_params_changed)
@@ -1216,6 +1221,8 @@ class MainWindow(QMainWindow):
         self._sl(self._row_pk_fmin).setValue(layer.peak_freq_min)
         self._sl(self._row_pk_fmax).setValue(layer.peak_freq_max)
         self._chk_pk_mirror.setChecked(layer.peak_mirror)
+        self._sl(self._row_pk_glide).setValue(int(layer.peak_glide * 1000))
+        self._sl(self._row_pk_tilt).setValue(int(layer.peak_tilt))
 
         # tunnel
         self._combo_tunnel_sides.setCurrentText(str(layer.tunnel_sides))
@@ -1332,6 +1339,8 @@ class MainWindow(QMainWindow):
         layer.peak_freq_min = self._sl(self._row_pk_fmin).value()
         layer.peak_freq_max = self._sl(self._row_pk_fmax).value()
         layer.peak_mirror = self._chk_pk_mirror.isChecked()
+        layer.peak_glide = self._sl(self._row_pk_glide).value() / 1000
+        layer.peak_tilt = float(self._sl(self._row_pk_tilt).value())
         layer.tunnel_sides = int(self._combo_tunnel_sides.currentText())
         layer.tunnel_kick_mode = self._combo_tunnel_kick_mode.currentIndex()
         layer.tunnel_kick_freq_lo = self._sl(self._row_tunnel_kick_freq_lo).value()
