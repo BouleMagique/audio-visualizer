@@ -314,7 +314,12 @@ class Renderer:
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
         # one full-screen pass, written as-is (rgb + coverage alpha)
         self.ctx.disable(moderngl.BLEND)
-        self.prog["u_out_alpha"].value = 1 if viz_type == 16 else 0
+        # Layer transparency: Halo Sine / Peaks emit their exact shape coverage
+        # (so dark silhouettes work), every other mode uses black = transparent.
+        if not layer.transparent:
+            self.prog["u_out_alpha"].value = 0
+        else:
+            self.prog["u_out_alpha"].value = 1 if viz_type in (6, 16) else 2
 
         bar_data = np.zeros(_BARS_MAX, dtype="f4")
         n = min(len(lbars), _BARS_MAX)

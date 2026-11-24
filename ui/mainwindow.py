@@ -418,6 +418,14 @@ class MainWindow(QMainWindow):
         self._combo_blend.addItems(["Additif", "Normal"])
         self._combo_blend.currentIndexChanged.connect(self._on_params_changed)
         tf.addRow("Fusion", self._combo_blend)
+        self._chk_transparent = QCheckBox("Transparent (on voit le fond / les calques dessous)")
+        self._chk_transparent.setToolTip(
+            "En fusion Normale : le noir du calque devient transparent.\n"
+            "Halo Sine / Halo Peaks : seule la forme est opaque (silhouettes sombres possibles).\n"
+            "Décoché = calque opaque (ancien comportement).")
+        self._chk_transparent.setChecked(True)
+        self._chk_transparent.stateChanged.connect(self._on_params_changed)
+        tf.addRow("", self._chk_transparent)
         pl.addWidget(tg)
 
         # ── Image de fond (BG layer) ──
@@ -1172,6 +1180,7 @@ class MainWindow(QMainWindow):
         self._sl(self._row_scale).setValue(int(layer.scale * 100))
         self._sl(self._row_opacity).setValue(int(layer.opacity * 100))
         self._combo_blend.setCurrentIndex(0 if layer.blend_mode == BLEND_ADDITIVE else 1)
+        self._chk_transparent.setChecked(layer.transparent)
 
         # viz + palette
         self._combo_viz.setCurrentText(layer.mode_name())
@@ -1307,6 +1316,7 @@ class MainWindow(QMainWindow):
         layer.scale = self._sl(self._row_scale).value() / 100
         layer.opacity = self._sl(self._row_opacity).value() / 100
         layer.blend_mode = BLEND_ADDITIVE if self._combo_blend.currentIndex() == 0 else BLEND_NORMAL
+        layer.transparent = self._chk_transparent.isChecked()
         layer.mode = VIZ_TYPES[self._combo_viz.currentText()]
         layer.name = layer.mode_name()
         layer.palette = self._current_palette()

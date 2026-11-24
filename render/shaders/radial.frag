@@ -5,7 +5,7 @@ out vec4 fragColor;
 
 uniform int   u_symmetry;   // kaleidoscope sectors (1 = off), all modes
 uniform float u_hue;        // global hue shift 0-1 (post rotation, all modes)
-uniform int   u_out_alpha;  // 1 = emit coverage alpha (Halo Peaks) instead of opaque
+uniform int   u_out_alpha;  // 0 = opaque, 1 = shape coverage (Halo Sine/Peaks), 2 = black = transparent
 uniform float u_polar;      // polar warp amount 0-1 (0 = off), all modes
 uniform int   u_polar_reps; // angular repetitions of the source around the circle
 uniform int   u_polar_log;  // 1 = log-polar (infinite tunnel, scrolls inward)
@@ -1024,5 +1024,9 @@ void main() {
         color = mix(color, vec3(1.0), f);
     }
 
+    // Transparent layer for every other mode: content is drawn over black, so
+    // the brightest channel is its coverage (premultiplied: rgb <= a). Black →
+    // fully transparent, glows → partially, solid colour → opaque.
+    if (u_out_alpha == 2) out_a = clamp(max(color.r, max(color.g, color.b)), 0.0, 1.0);
     fragColor = vec4(color, out_a);
 }

@@ -94,6 +94,7 @@ class Layer:
     scale: float = 1.0                  # 0.1 → 2.0
     opacity: float = 1.0               # 0.0 → 1.0
     blend_mode: str = BLEND_ADDITIVE
+    transparent: bool = True           # Normal blend: show what's beneath (off = opaque)
     visible: bool = True
     muted: bool = False                # keeps animating but ignores the audio
     solo: bool = False
