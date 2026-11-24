@@ -829,7 +829,9 @@ void main() {
         vec3 col   = earth * branch * grow * (1.0 + u_kick * 1.5);
 
         // Spores: green points that pop only on kick.
-        float spore = step(0.97, pnoise(uv * 8.0 + u_time)) * u_kick * u_myc_spore;
+        // pnoise peaks around ±0.66 (0.97 was never reached → spores invisible);
+        // kick_accum (decaying) instead of the 1-frame kick so they stay visible.
+        float spore = step(0.45, pnoise(uv * 8.0 + u_time)) * u_kick_accum * u_myc_spore;
         col += vec3(0.6, 0.9, 0.4) * spore;
 
         col += vec3(0.02, 0.04, 0.02) * (pfbm(uv * 0.5 + u_time * 0.05) * 0.5 + 0.5);
@@ -850,13 +852,15 @@ void main() {
         vec2 c = vec2(-0.75 + sin(u_time * u_psy_speed * 0.13) * u_jul_morph + u_bass * 0.05,
                        0.12 + cos(u_time * u_psy_speed * 0.11) * u_jul_morph + u_mid * 0.04);
 
-        vec2 z = uv; float iter = 0.0; const float MAXI = 64.0;
+        vec2 z = uv; float iter = 0.0; const float MAXI = 64.0; bool esc = false;
         for (float i = 0.0; i < 64.0; i++) {
             z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
-            if (dot(z, z) > 4.0) { iter = i; break; }
+            if (dot(z, z) > 256.0) { iter = i; esc = true; break; }
             iter = i;
         }
-        float m = iter / MAXI;
+        // Smooth (continuous) escape count → no colour banding between iterations.
+        if (esc) iter = max(iter + 1.0 - log2(0.5 * log2(dot(z, z))), 0.0);
+        float m = clamp(iter / MAXI, 0.0, 1.0);
 
         float hue    = fract(m * 2.0 + u_time * 0.05 + u_bass * 0.2 + u_hue);
         float bright = (u_jul_invert >= 1) ? pow(m, 1.5) : pow(1.0 - m, 1.5);
