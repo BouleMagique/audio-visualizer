@@ -1,16 +1,16 @@
 {
   "version": 1,
   "bg": {
-    "image_path": "/mnt/dev/DEV/Audio-Visualizer/presets/halo-peaks-silhouette-bg.png",
+    "image_path": "halo-peaks-silhouette-bg.png",
     "opacity": 1.0,
     "zoom_reactive": false,
     "zoom_intensity": 1.0
   },
-  "center_image_path": "/mnt/dev/DEV/Audio-Visualizer/presets/halo-peaks-silhouette-center.png",
+  "center_image_path": "halo-peaks-silhouette-center.png",
   "layers": [
     {
       "mode": 16,
-      "name": "Fantôme (blanc)",
+      "name": "Fant\u00f4me (blanc)",
       "x": 0.0,
       "y": 0.0,
       "scale": 1.0,

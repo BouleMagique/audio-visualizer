@@ -1135,7 +1135,17 @@ class MainWindow(QMainWindow):
         self._lm.bg.opacity = bg.get("opacity", 1.0)
         self._lm.bg.zoom_reactive = bg.get("zoom_reactive", False)
         self._lm.bg.zoom_intensity = bg.get("zoom_intensity", self._lm.bg.zoom_intensity)
-        bg_path = bg.get("image_path")
+        def _resolve(p):
+            # absolute path as saved → else same file name next to the preset
+            # (portable presets) → else drop it (avoids a missing file at export)
+            if not p:
+                return None
+            if Path(p).exists():
+                return str(p)
+            cand = Path(path).parent / Path(p).name
+            return str(cand) if cand.exists() else None
+
+        bg_path = _resolve(bg.get("image_path"))
         self._lm.bg.image_path = bg_path
         self._bg_image_path = bg_path
         if bg_path and Path(bg_path).exists():
@@ -1147,7 +1157,7 @@ class MainWindow(QMainWindow):
             self._btn_bg_clear.setEnabled(False)
             self._each_view(lambda v: v.clear_background())
 
-        ctr = data.get("center_image_path")
+        ctr = _resolve(data.get("center_image_path"))
         self._center_image_path = ctr
         if ctr and Path(ctr).exists():
             self._center_label.setText(Path(ctr).name)
