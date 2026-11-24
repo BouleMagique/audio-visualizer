@@ -5,6 +5,7 @@ out vec4 fragColor;
 
 uniform int   u_symmetry;   // kaleidoscope sectors (1 = off), all modes
 uniform float u_hue;        // global hue shift 0-1 (post rotation, all modes)
+uniform int   u_out_alpha;  // 1 = emit coverage alpha (Halo Peaks) instead of opaque
 uniform float u_polar;      // polar warp amount 0-1 (0 = off), all modes
 uniform int   u_polar_reps; // angular repetitions of the source around the circle
 uniform int   u_polar_log;  // 1 = log-polar (infinite tunnel, scrolls inward)
@@ -318,6 +319,7 @@ int bar_index_x(float uv_x) {
 
 // ────────────────────────────────────────────────────────────────
 void main() {
+    float out_a = 1.0;
     vec2 v_uv = polarWarp(kaleido(v_uv0, u_symmetry));
     vec2 bg_uv = v_uv;
     if (u_bg_pulse_enabled == 1 && u_has_bg == 1) {
@@ -701,6 +703,7 @@ void main() {
         vec4 ov = vec4(c, u_sine_fill) * in_fill * step(0.0001, u_sine_fill);
         ov = sine_strokes(ov, d_px, c);
         color = mix(color, ov.rgb, ov.a);
+        float cov6 = ov.a;
 
         // Center image (pulsing), optionally pixelated
         float r_c = u_halo_r_base * (1.0 + 0.10 * u_pulse * u_pulse_intensity);
@@ -712,6 +715,7 @@ void main() {
             }
             float mask = clamp((r_c - dist) / px + 0.5, 0.0, 1.0);
             color = mix(color, texture(u_center_texture, clamp(uvt, 0.0, 1.0)).rgb, mask);
+            cov6 = max(cov6, mask);
         }
 
         // Ring glow around the center circle. Elements overwrite each other in draw
@@ -731,6 +735,8 @@ void main() {
         ring = mix(ring, vec4(u_pal1, 200.0 / 255.0), band_px(dpx, rr - rw, rr));
         ring = mix(ring, vec4(vec3(1.0), 85.0 / 255.0), band_px(dpx, rr - rw * 0.5, rr));
         color = color * (1.0 - ring.a * ring.a) + ring.rgb * ring.a * ring.a * ring.a;
+        cov6 = 1.0 - (1.0 - cov6) * (1.0 - ring.a * ring.a);
+        if (u_out_alpha == 1) out_a = cov6;
 
     // ── Nuclear Shockwave — deep space + white shockwaves fired on each kick ──
     } else if (u_viz_type == 10) {
@@ -1018,5 +1024,5 @@ void main() {
         color = mix(color, vec3(1.0), f);
     }
 
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(color, out_a);
 }

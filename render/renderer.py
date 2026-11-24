@@ -99,7 +99,7 @@ class LayerState:
             self.fbo.color_attachments[0].release()
             self.fbo.release()
         self.fbo = self.ctx.framebuffer(
-            color_attachments=[self.ctx.texture((width, height), 3)])
+            color_attachments=[self.ctx.texture((width, height), 4)])   # RGBA: layer alpha
 
     def release(self) -> None:
         self.bass_hist_tex.release()
@@ -259,10 +259,12 @@ class Renderer:
     def _composite(self, st: LayerState, layer: Layer) -> None:
         self.fbo.use()
         self.ctx.enable(moderngl.BLEND)
+        # Layer textures are premultiplied (rendered over black) with a coverage
+        # alpha (1 everywhere except modes that emit one, e.g. Halo Peaks).
         if layer.blend_mode == BLEND_ADDITIVE:
-            self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE
+            self.ctx.blend_func = moderngl.ONE, moderngl.ONE
         else:
-            self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+            self.ctx.blend_func = moderngl.ONE, moderngl.ONE_MINUS_SRC_ALPHA
         st.fbo.color_attachments[0].use(location=0)
         self.composite_prog["u_tex"].value     = 0
         self.composite_prog["u_offset"].value  = (float(layer.x), float(layer.y))
@@ -310,8 +312,9 @@ class Renderer:
 
         st.fbo.use()
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
-        self.ctx.enable(moderngl.BLEND)
-        self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+        # one full-screen pass, written as-is (rgb + coverage alpha)
+        self.ctx.disable(moderngl.BLEND)
+        self.prog["u_out_alpha"].value = 1 if viz_type == 16 else 0
 
         bar_data = np.zeros(_BARS_MAX, dtype="f4")
         n = min(len(lbars), _BARS_MAX)
