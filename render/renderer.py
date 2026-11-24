@@ -10,6 +10,7 @@ from config.defaults import (
 )
 from core.layer import Layer, BGLayer, LayerManager, BLEND_ADDITIVE, apply_auto_lfo
 from render.modes import HaloSineMode, FlatSineMode
+from core.fft import SPEC_FREQS
 
 
 SHADER_DIR = Path(__file__).parent / "shaders"
@@ -81,6 +82,11 @@ class LayerState:
         self.bass_hist2_tex.repeat_y = False
 
         self.halo_sine = HaloSineMode()
+        # Halo Peaks (mode 16) state
+        self.pk_curve: np.ndarray | None = None
+        self.pk_tracks: list = []
+        self.pk_gpeak: float = -60.0
+        self.pk_t: float = 0.0
         self.flat_sine = FlatSineMode()
         # Spline control values for modes 6/9 (u_spline_tex), read with texelFetch
         self.spline_tex = ctx.texture((_SPLINE_MAX, 1), 1, dtype='f4')
@@ -93,7 +99,7 @@ class LayerState:
             self.fbo.color_attachments[0].release()
             self.fbo.release()
         self.fbo = self.ctx.framebuffer(
-            color_attachments=[self.ctx.texture((width, height), 3)])
+            color_attachments=[self.ctx.texture((width, height), 4)])   # RGBA: layer alpha
 
     def release(self) -> None:
         self.bass_hist_tex.release()
@@ -253,10 +259,12 @@ class Renderer:
     def _composite(self, st: LayerState, layer: Layer) -> None:
         self.fbo.use()
         self.ctx.enable(moderngl.BLEND)
+        # Layer textures are premultiplied (rendered over black) with a coverage
+        # alpha (1 everywhere except modes that emit one, e.g. Halo Peaks).
         if layer.blend_mode == BLEND_ADDITIVE:
-            self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE
+            self.ctx.blend_func = moderngl.ONE, moderngl.ONE
         else:
-            self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+            self.ctx.blend_func = moderngl.ONE, moderngl.ONE_MINUS_SRC_ALPHA
         st.fbo.color_attachments[0].use(location=0)
         self.composite_prog["u_tex"].value     = 0
         self.composite_prog["u_offset"].value  = (float(layer.x), float(layer.y))
@@ -270,11 +278,14 @@ class Renderer:
         # Auto-LFO: sweep flagged fields for this frame (drives preview AND export).
         apply_auto_lfo(layer, time)
 
+        spec_db = getattr(bars, "spec_db", None)
+
         # Mute: the layer keeps running (time, LFO, live shockwaves) but hears
         # silence → no bars, no pulse, no kicks.
         if layer.muted:
             bars = np.zeros_like(bars)
             pulse = 0.0
+            spec_db = None
 
         palette = layer.palette if layer.palette else _DEFAULT_PALETTE
         viz_type = layer.mode
@@ -301,8 +312,14 @@ class Renderer:
 
         st.fbo.use()
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
-        self.ctx.enable(moderngl.BLEND)
-        self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+        # one full-screen pass, written as-is (rgb + coverage alpha)
+        self.ctx.disable(moderngl.BLEND)
+        # Layer transparency: Halo Sine / Peaks emit their exact shape coverage
+        # (so dark silhouettes work), every other mode uses black = transparent.
+        if not layer.transparent:
+            self.prog["u_out_alpha"].value = 0
+        else:
+            self.prog["u_out_alpha"].value = 1 if viz_type in (6, 16) else 2
 
         bar_data = np.zeros(_BARS_MAX, dtype="f4")
         n = min(len(lbars), _BARS_MAX)
@@ -336,7 +353,8 @@ class Renderer:
         self.prog["u_bar_width"].value = float(BAR_WIDTH)
         self.prog["u_aspect"].value = float(self.width / self.height)
         self.prog["u_sensitivity"].value = float(layer.sensitivity)
-        self.prog["u_viz_type"].value = int(viz_type)
+        # Halo Peaks reuses the Halo Sine drawing (only the curve differs)
+        self.prog["u_viz_type"].value = 6 if viz_type == 16 else int(viz_type)
         self.prog["u_rotation"].value = float(layer.rotation)
         self.prog["u_symmetry"].value = int(layer.symmetry)
         self.prog["u_polar"].value = float(layer.polar)
@@ -430,6 +448,8 @@ class Renderer:
         # Spline modes: CPU analysis → control values, drawn by the shader
         if viz_type in (6, 9):
             self._update_spline(st, layer, lbars)
+        elif viz_type == 16:
+            self._update_peaks(st, layer, spec_db, time)
 
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
@@ -587,6 +607,171 @@ class Renderer:
         self.prog["u_tunnel_kick_zoom"].value = float(layer.tunnel_kick_zoom)
         self.prog["u_tunnel_chroma"].value = float(layer.tunnel_chroma)
         self.prog["u_tunnel_bass_speed"].value = float(layer.tunnel_bass_speed)
+
+    def _update_peaks(self, st: LayerState, layer: Layer, spec_db, time: float) -> None:
+        """Halo Peaks: isolated Gaussian bumps on a round halo, one per dominant peak.
+
+        Peaks are TRACKED across frames instead of re-picked from scratch: each
+        candidate is matched to the nearest existing bump, whose position then
+        glides toward it (short time constant) → bumps stay whole and slide along
+        the rim instead of popping in/out at slightly different spots. Hysteresis
+        on the cut-off (on/off thresholds) and a threshold that follows the song's
+        slow peak (not each frame's max) stop flicker without adding trail.
+        """
+        dt = time - st.pk_t
+        dt = 1.0 / 60.0 if (dt < 0.0 or dt > 0.25) else dt
+        st.pk_t = time
+        fmin, fmax = sorted((float(layer.peak_freq_min), float(layer.peak_freq_max)))
+        sel = (SPEC_FREQS >= fmin) & (SPEC_FREQS <= max(fmax, fmin * 1.5))
+        npts = int(sel.sum())
+        if st.pk_curve is None or len(st.pk_curve) != npts:
+            st.pk_curve = np.zeros(npts, np.float32)
+            st.pk_tracks = []
+        pos = np.linspace(0.0, 1.0, npts)
+        w = max(float(layer.peak_width), 1e-3)
+        tracks = st.pk_tracks
+
+        cands = []
+        merge = float(layer.peak_merge) * w              # fusion distance
+        cut = max(float(layer.peak_cut_db), 1.0)
+        if spec_db is not None and npts > 4:
+            # spectral tilt: spec_db carries +3 dB/oct; re-tilt to the layer's choice
+            db = spec_db[sel] + (float(layer.peak_tilt) - 3.0) * np.log2(SPEC_FREQS[sel] / 1000.0)
+            # light smoothing along frequency for detection → one maximum per hump
+            k = np.exp(-0.5 * (np.arange(-6, 7) / 2.5) ** 2); k /= k.sum()
+            dbs = np.convolve(np.pad(db, 6, mode="edge"), k, mode="valid")
+            # threshold follows the song's slow peak (fast up, 3 dB/s down)
+            st.pk_gpeak = max(float(dbs.max()), st.pk_gpeak - 3.0 * dt)
+            thr_on = max(st.pk_gpeak - cut, -75.0)
+            thr_off = thr_on - 4.0                      # hysteresis
+            lm = np.where((dbs[1:-1] > dbs[:-2]) & (dbs[1:-1] >= dbs[2:])
+                          & (dbs[1:-1] > thr_off))[0] + 1
+            lm = lm[np.argsort(dbs[lm])[::-1]]
+            # Clustering: peaks within `merge` of a stronger one join its group →
+            # the group becomes ONE normal-width bump at its energy centre (weighted
+            # toward the loudest member) and takes a single slot. As the energy
+            # shifts inside the group, that centre moves → the bump SWEEPS
+            # smoothly instead of 3 bumps bouncing side by side.
+            groups = []                                   # [lead_p, [(p, h)], strong]
+            for i in lm:
+                p = pos[i]
+                h = max(0.0, (dbs[i] - thr_off) / (cut + 4.0)) ** 1.3 * layer.sensitivity
+                g = next((g for g in groups if abs(p - g[0]) < merge), None)
+                if g is None:
+                    groups.append([p, [(p, h)], dbs[i] > thr_on])
+                else:
+                    g[1].append((p, h))
+            for _, mem, strong in groups:
+                ps = np.array([m[0] for m in mem]); hs = np.array([m[1] for m in mem])
+                wt = hs ** 2 + 1e-9
+                c = float((ps * wt).sum() / wt.sum())
+                cands.append((c, float(hs.max()), strong, w))
+
+        # match candidates (strongest first) to the nearest unmatched track
+        max_jump = max(0.08, 3.0 * w)
+        used = set()
+        challenged = set()
+        # bumps above the current max (slider lowered) are dropped
+        del tracks[max(1, int(layer.peak_max)):]
+        for p, h, strong, cw in cands:
+            best, bd = None, max_jump
+            for ti, t in enumerate(tracks):
+                if ti not in used and abs(t["pos"] - p) < bd:
+                    best, bd = ti, abs(t["pos"] - p)
+            if best is not None:
+                used.add(best)
+                tracks[best]["tpos"], tracks[best]["tamp"] = p, h
+                tracks[best]["twid"] = cw
+                continue
+            if not strong:
+                continue
+            if len(tracks) < max(1, int(layer.peak_max)):
+                tracks.append({"pos": p, "tpos": p, "amp": 0.0, "tamp": h, "chal": 0.0,
+                               "wid": cw, "twid": cw})
+                used.add(len(tracks) - 1)
+                continue
+            # Slots full: never spawn a 2nd bump — the weakest free bump MOVES here,
+            # but only if the challenger clearly dominates for `peak_hold` seconds
+            # (or the bump has already faded). Kills the flicker between rival freqs.
+            free = [ti for ti in range(len(tracks)) if ti not in used]
+            if not free:
+                continue
+            ti = min(free, key=lambda j: tracks[j]["tamp"] if j not in challenged else 1e9)
+            if ti in challenged:
+                continue
+            t = tracks[ti]
+            challenged.add(ti)
+            if h > t["tamp"] * 1.25 or t["amp"] < 0.05:
+                t["chal"] = t.get("chal", 0.0) + dt
+                if t["chal"] >= float(layer.peak_hold) or t["amp"] < 0.05:
+                    if abs(t["pos"] - p) > max_jump:      # far move: teleport, re-rise
+                        t["pos"] = p
+                        t["amp"] = min(t["amp"], 0.0)
+                    t["tpos"], t["tamp"], t["chal"] = p, h, 0.0
+                    t["twid"] = cw
+                    used.add(ti)
+        for ti, t in enumerate(tracks):
+            if ti not in challenged:
+                t["chal"] = 0.0
+            if ti not in used:
+                t["tamp"] = 0.0
+
+        if dt > 0.0:
+            kp = 1.0 - np.exp(-dt / max(float(layer.peak_glide), 1e-3))
+            up = 1.0 - np.exp(-dt / 0.015)
+            down = 1.0 - np.exp(-dt / max(float(layer.peak_release), 0.01))
+            kw = 1.0 - np.exp(-dt / 0.08)
+            for t in tracks:
+                t.setdefault("wid", w); t.setdefault("twid", w)
+                t["pos"] += (t["tpos"] - t["pos"]) * kp
+                t["amp"] += (t["tamp"] - t["amp"]) * (up if t["tamp"] > t["amp"] else down)
+                t["wid"] += (t["twid"] - t["wid"]) * kw
+            st.pk_tracks = tracks = [t for t in tracks if t["amp"] > 0.004 or t["tamp"] > 0.0]
+        # Track fusion: two bumps that drift within `merge` become one wave.
+        merged = True
+        while merged and len(tracks) > 1:
+            merged = False
+            tracks.sort(key=lambda t: t["pos"])
+            for i in range(len(tracks) - 1):
+                a, b = tracks[i], tracks[i + 1]
+                if abs(b["pos"] - a["pos"]) < merge:
+                    wa, wb = a["amp"] + 1e-6, b["amp"] + 1e-6
+                    c = (a["pos"] * wa + b["pos"] * wb) / (wa + wb)
+                    keep = a if a["amp"] >= b["amp"] else b
+                    # survivor keeps its own position and glides to the centre
+                    keep["tpos"] = c
+                    keep["amp"] = max(a["amp"], b["amp"])
+                    keep["tamp"] = max(a["tamp"], b["tamp"])
+                    tracks.remove(b if keep is a else a)
+                    merged = True
+                    break
+        st.pk_tracks = tracks
+
+        curve = np.zeros(npts, np.float32)
+        for t in tracks:
+            tw = max(t.get("wid", w), 1e-3)
+            curve = np.maximum(curve, t["amp"] * np.exp(-0.5 * ((pos - t["pos"]) / tw) ** 2))
+        st.pk_curve = curve
+
+        n = _SPLINE_MAX
+        src = np.arange(npts)
+        if layer.peak_mirror:
+            half = np.interp(np.linspace(0, npts - 1, n // 2), src, st.pk_curve)
+            deform = np.concatenate([half, half[::-1]])
+        else:
+            deform = np.interp(np.linspace(0, npts - 1, n), src, st.pk_curve)
+        data = deform.astype("f4")
+        st.spline_tex.write(data.tobytes())
+        st.spline_tex.use(location=4)
+        self.prog["u_spline_tex"].value = 4
+        self.prog["u_spline_n"].value = n
+        self.prog["u_sine_amp"].value = float(layer.halo_amplitude)
+        self.prog["u_sine_gap"].value = float(layer.halo_spline_gap)
+        self.prog["u_sine_glow"].value = int(layer.halo_glow_layers)
+        self.prog["u_sine_fill"].value = float(layer.halo_fill_opacity)
+        self.prog["u_sine_mean"].value = float(deform.mean())
+        self.prog["u_center_pixel"].value = int(layer.halo_pixel_size)
+        self.prog["u_res_y"].value = float(self.height)
 
     def _update_spline(self, st: LayerState, layer: Layer, bars: np.ndarray) -> None:
         n = max(2, min(int(layer.halo_n_points), _SPLINE_MAX))

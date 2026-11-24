@@ -30,6 +30,8 @@ from config.defaults import (
     HALO_SINE_R_BASE, HALO_SINE_AMPLITUDE, HALO_SINE_N_POINTS,
     HALO_SINE_GLOW_LAYERS, HALO_SINE_SMOOTHING_DECAY, HALO_SINE_FILL_OPACITY,
     HALO_SINE_SPLINE_GAP, HALO_SINE_PIXEL_SIZE,
+    PEAK_CUT_DB, PEAK_MAX, PEAK_WIDTH, PEAK_RELEASE, PEAK_FREQ_MIN, PEAK_FREQ_MAX, PEAK_MIRROR,
+    PEAK_GLIDE, PEAK_TILT, PEAK_HOLD, PEAK_MERGE,
     TUNNEL_SIDES, TUNNEL_RINGS, TUNNEL_SPEED, TUNNEL_KICK_ZOOM, TUNNEL_CHROMA,
     TUNNEL_KICK_SENSITIVITY, TUNNEL_BASS_SPEED, TUNNEL_KICK_MODE,
     TUNNEL_KICK_FREQ_LO, TUNNEL_KICK_FREQ_HI,
@@ -51,12 +53,13 @@ FFT_ANALYSIS_BARS_MAX = 512   # raised to this only while a layer asks for > 256
 # Live analysis windows: shorter = snappier but coarser bass. Delay ≈ half the window.
 LIVE_FFT_SIZES = {"Réactif · 1024": 1024, "Équilibré · 2048": 2048, "Précis · 4096": 4096}
 
-_RADIAL_MODES     = {0, 4, 5, 6, 7}
-_ROTATION_MODES   = {0, 4, 5, 6, 7, 9}
+_RADIAL_MODES     = {0, 4, 5, 6, 7, 16}
+_ROTATION_MODES   = {0, 4, 5, 6, 7, 9, 16}
 _BAR_MODES        = {0, 1, 2, 4, 5, 7}
 _HEIGHT_MODES     = {0, 1, 2, 4, 5, 7}
-_HALO_MODES       = {4, 5, 6, 7, 8}
-_HALO_SINE_MODES  = {6, 9}
+_HALO_MODES       = {4, 5, 6, 7, 8, 16}
+_HALO_SINE_MODES  = {6, 9, 16}
+_PEAK_MODES       = {16}
 _TUNNEL_MODES     = {8}
 _MIRROR_MODES     = {0, 4}
 _NUKE_MODES       = {10}
@@ -415,6 +418,14 @@ class MainWindow(QMainWindow):
         self._combo_blend.addItems(["Additif", "Normal"])
         self._combo_blend.currentIndexChanged.connect(self._on_params_changed)
         tf.addRow("Fusion", self._combo_blend)
+        self._chk_transparent = QCheckBox("Transparent (on voit le fond / les calques dessous)")
+        self._chk_transparent.setToolTip(
+            "En fusion Normale : le noir du calque devient transparent.\n"
+            "Halo Sine / Halo Peaks : seule la forme est opaque (silhouettes sombres possibles).\n"
+            "Décoché = calque opaque (ancien comportement).")
+        self._chk_transparent.setChecked(True)
+        self._chk_transparent.stateChanged.connect(self._on_params_changed)
+        tf.addRow("", self._chk_transparent)
         pl.addWidget(tg)
 
         # ── Image de fond (BG layer) ──
@@ -585,6 +596,35 @@ class MainWindow(QMainWindow):
         self._row_hs_pixel = self._make_slider_row(
             hsf, "Pixelisation", 1, 64, HALO_SINE_PIXEL_SIZE, self._on_params_changed, auto=True)
         pl.addWidget(self._halo_sine_group)
+
+        # ── Halo Peaks (mode 16) ──
+        self._peak_group = QGroupBox("Halo Peaks")
+        pkf = QFormLayout(self._peak_group)
+        self._row_pk_cut = self._make_slider_row(
+            pkf, "Cut-off (dB)", 3, 40, int(PEAK_CUT_DB), self._on_params_changed)
+        self._row_pk_max = self._make_slider_row(
+            pkf, "Pics max", 1, 16, PEAK_MAX, self._on_params_changed)
+        self._row_pk_width = self._make_slider_row(
+            pkf, "Largeur bosse (×0.001)", 5, 120, int(PEAK_WIDTH * 1000), self._on_params_changed)
+        self._row_pk_release = self._make_slider_row(
+            pkf, "Traînée (ms)", 20, 1500, int(PEAK_RELEASE * 1000), self._on_params_changed)
+        self._row_pk_fmin = self._make_slider_row(
+            pkf, "Fréq min (Hz)", 20, 500, PEAK_FREQ_MIN, self._on_params_changed)
+        self._row_pk_fmax = self._make_slider_row(
+            pkf, "Fréq max (Hz)", 500, 16000, PEAK_FREQ_MAX, self._on_params_changed)
+        self._row_pk_glide = self._make_slider_row(
+            pkf, "Glisse (ms)", 5, 300, int(PEAK_GLIDE * 1000), self._on_params_changed)
+        self._row_pk_hold = self._make_slider_row(
+            pkf, "Stabilité (ms)", 0, 400, int(PEAK_HOLD * 1000), self._on_params_changed)
+        self._row_pk_merge = self._make_slider_row(
+            pkf, "Fusion (×0.1 largeur)", 0, 100, int(PEAK_MERGE * 10), self._on_params_changed)
+        self._row_pk_tilt = self._make_slider_row(
+            pkf, "Pente aigus (dB/oct)", -9, 6, int(PEAK_TILT), self._on_params_changed)
+        self._chk_pk_mirror = QCheckBox("Miroir (basses en haut, symétrique)")
+        self._chk_pk_mirror.setChecked(PEAK_MIRROR)
+        self._chk_pk_mirror.stateChanged.connect(self._on_params_changed)
+        pkf.addRow("", self._chk_pk_mirror)
+        pl.addWidget(self._peak_group)
 
         # ── Tunnel Arcade ──
         self._tunnel_group = QGroupBox("Tunnel Arcade")
@@ -1140,6 +1180,7 @@ class MainWindow(QMainWindow):
         self._sl(self._row_scale).setValue(int(layer.scale * 100))
         self._sl(self._row_opacity).setValue(int(layer.opacity * 100))
         self._combo_blend.setCurrentIndex(0 if layer.blend_mode == BLEND_ADDITIVE else 1)
+        self._chk_transparent.setChecked(layer.transparent)
 
         # viz + palette
         self._combo_viz.setCurrentText(layer.mode_name())
@@ -1186,6 +1227,17 @@ class MainWindow(QMainWindow):
         self._sl(self._row_hs_fill).setValue(int(layer.halo_fill_opacity * 100))
         self._sl(self._row_hs_gap).setValue(int(layer.halo_spline_gap * 100))
         self._sl(self._row_hs_pixel).setValue(layer.halo_pixel_size)
+        self._sl(self._row_pk_cut).setValue(int(layer.peak_cut_db))
+        self._sl(self._row_pk_max).setValue(layer.peak_max)
+        self._sl(self._row_pk_width).setValue(int(layer.peak_width * 1000))
+        self._sl(self._row_pk_release).setValue(int(layer.peak_release * 1000))
+        self._sl(self._row_pk_fmin).setValue(layer.peak_freq_min)
+        self._sl(self._row_pk_fmax).setValue(layer.peak_freq_max)
+        self._chk_pk_mirror.setChecked(layer.peak_mirror)
+        self._sl(self._row_pk_glide).setValue(int(layer.peak_glide * 1000))
+        self._sl(self._row_pk_tilt).setValue(int(layer.peak_tilt))
+        self._sl(self._row_pk_hold).setValue(int(layer.peak_hold * 1000))
+        self._sl(self._row_pk_merge).setValue(int(layer.peak_merge * 10))
 
         # tunnel
         self._combo_tunnel_sides.setCurrentText(str(layer.tunnel_sides))
@@ -1264,6 +1316,7 @@ class MainWindow(QMainWindow):
         layer.scale = self._sl(self._row_scale).value() / 100
         layer.opacity = self._sl(self._row_opacity).value() / 100
         layer.blend_mode = BLEND_ADDITIVE if self._combo_blend.currentIndex() == 0 else BLEND_NORMAL
+        layer.transparent = self._chk_transparent.isChecked()
         layer.mode = VIZ_TYPES[self._combo_viz.currentText()]
         layer.name = layer.mode_name()
         layer.palette = self._current_palette()
@@ -1295,6 +1348,17 @@ class MainWindow(QMainWindow):
         layer.halo_fill_opacity = self._sl(self._row_hs_fill).value() / 100
         layer.halo_spline_gap = self._sl(self._row_hs_gap).value() / 100
         layer.halo_pixel_size = self._sl(self._row_hs_pixel).value()
+        layer.peak_cut_db = float(self._sl(self._row_pk_cut).value())
+        layer.peak_max = self._sl(self._row_pk_max).value()
+        layer.peak_width = self._sl(self._row_pk_width).value() / 1000
+        layer.peak_release = self._sl(self._row_pk_release).value() / 1000
+        layer.peak_freq_min = self._sl(self._row_pk_fmin).value()
+        layer.peak_freq_max = self._sl(self._row_pk_fmax).value()
+        layer.peak_mirror = self._chk_pk_mirror.isChecked()
+        layer.peak_glide = self._sl(self._row_pk_glide).value() / 1000
+        layer.peak_tilt = float(self._sl(self._row_pk_tilt).value())
+        layer.peak_hold = self._sl(self._row_pk_hold).value() / 1000
+        layer.peak_merge = self._sl(self._row_pk_merge).value() / 10
         layer.tunnel_sides = int(self._combo_tunnel_sides.currentText())
         layer.tunnel_kick_mode = self._combo_tunnel_kick_mode.currentIndex()
         layer.tunnel_kick_freq_lo = self._sl(self._row_tunnel_kick_freq_lo).value()
@@ -1381,7 +1445,11 @@ class MainWindow(QMainWindow):
         self._set_row_visible(self._row_rotation,  has_rotation)
         self._center_group.setVisible(is_halo)
         self._halo_sine_group.setVisible(is_halo_sine)
-        is_halo_circle = viz_type == 6
+        is_halo_circle = viz_type in (6, 16)
+        self._peak_group.setVisible(viz_type in _PEAK_MODES)
+        # Halo Peaks always uses 256 points and its own release → hide those rows
+        self._set_row_visible(self._row_hs_points, viz_type != 16)
+        self._set_row_visible(self._row_hs_decay,  viz_type != 16)
         self._set_row_visible(self._row_hs_r_base, is_halo_circle)
         self._set_row_visible(self._row_hs_gap,    is_halo_circle)
         self._set_row_visible(self._row_hs_pixel,  is_halo_circle)

@@ -10,6 +10,18 @@ _DB_FLOOR = -70.0
 _DB_CEIL  = -10.0
 _DB_RANGE = _DB_CEIL - _DB_FLOOR
 
+# Fine log-frequency spectrum for peak-based modes (Halo Peaks). Gaussian
+# smoothing of constant width in octaves (min 1.5 FFT bins), +3 dB/oct tilt.
+SPEC_N = 384
+SPEC_FREQS = np.geomspace(20.0, 16000.0, SPEC_N)
+_SPEC_SIGMA_OCT = 1.0 / 24.0
+
+
+class SpecBars(np.ndarray):
+    """Bars array that also carries `spec_db` (SPEC_N fine log-freq dB spectrum),
+    so it reaches the renderer through every existing path unchanged."""
+    spec_db = None
+
 
 class FFTProcessor:
     def __init__(self, sr: int, fft_size: int = FFT_SIZE, num_bars: int = NUM_BARS,
@@ -39,6 +51,22 @@ class FFTProcessor:
         else:
             self._build_log_bins()
         self._pack_bin_ranges(fft_size // 2 + 1)
+        self._build_spec_matrix()
+
+    def _build_spec_matrix(self):
+        nb = self.fft_size // 2 + 1
+        bin_hz = self.sr / self.fft_size
+        freqs = np.arange(nb) * bin_hz
+        W = np.zeros((SPEC_N, nb), np.float32)
+        for i, f in enumerate(SPEC_FREQS):
+            s_hz = max(f * (2 ** _SPEC_SIGMA_OCT - 1), 1.5 * bin_hz)
+            lo = max(0, int((f - 4 * s_hz) / bin_hz))
+            hi = min(nb, int((f + 4 * s_hz) / bin_hz) + 2)
+            w = np.exp(-0.5 * ((freqs[lo:hi] - f) / s_hz) ** 2)
+            if w.sum() > 0:
+                W[i, lo:hi] = w / w.sum()
+        self._spec_W = W
+        self._spec_tilt = (3.0 * np.log2(SPEC_FREQS / 1000.0)).astype(np.float32)
 
     def _pack_bin_ranges(self, n_freqs: int):
         """Turn _bin_ranges into flat arrays so process() can bin without a loop."""
@@ -136,7 +164,10 @@ class FFTProcessor:
         sub_n = max(1, self.num_bars // 10)
         pulse = float(self._smoothed[:sub_n].mean())
 
-        return self._smoothed.copy(), pulse
+        out = self._smoothed.copy().view(SpecBars)
+        pw = self._spec_W @ ((spectrum / self.fft_size) ** 2).astype(np.float32)
+        out.spec_db = 10.0 * np.log10(pw + 1e-14) + self._spec_tilt
+        return out, pulse
 
     def reset(self):
         self._smoothed[:] = 0.0
