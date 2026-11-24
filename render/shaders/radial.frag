@@ -312,6 +312,16 @@ bool in_bar_slot(float uv_x) {
     return frac > half_gap && frac < (1.0 - half_gap);
 }
 
+// Anti-aliased version of in_bar_slot: horizontal coverage of the bar slot at
+// uv_x, with a 1-pixel ramp (pw_x = fwidth(uv_x), computed by the caller).
+float bar_slot_cov(float uv_x, float pw_x) {
+    float n = float(u_num_bars);
+    float frac = fract(uv_x * n);
+    float half_gap = (1.0 - u_bar_width) * 0.5;
+    float q = min(frac - half_gap, (1.0 - half_gap) - frac) / n;   // signed, uv units
+    return clamp(q / max(pw_x, 1e-6) + 0.5, 0.0, 1.0);
+}
+
 int bar_index_x(float uv_x) {
     return clamp(int(uv_x * float(u_num_bars)), 0, u_num_bars - 1);
 }
@@ -360,20 +370,23 @@ void main() {
         }
         float ang_diff = abs(mod(angle - bar_ang + PI, 2.0 * PI) - PI);
 
-        if (ang_diff < half_w && dist >= pulse_r) {
-            float cap_r  = half_w * (pulse_r + bar_len);
-            vec2  tip    = vec2(cos(bar_ang), sin(bar_ang)) * (pulse_r + bar_len);
-            bool  in_rad = dist <= pulse_r + bar_len;
-            bool  in_cap = length(uv - tip) < cap_r;
-            if (in_rad || in_cap) {
-                float rel = (dist - pulse_r) / max(bar_len, 0.001);
-                color = col(bar_val, freq_t0) * mix(1.0, 0.7, rel);
-            }
-        }
+        // Anti-aliasing: every edge becomes a 1-pixel coverage ramp instead of a
+        // yes/no test. Pixel footprint from fwidth(uv) (continuous, so it stays
+        // right after Polaire / Symétrie warps). Computed outside any branch.
+        float pw = max(length(fwidth(uv)) * 0.7071, 1e-5);
+        float cap_r = half_w * (pulse_r + bar_len);
+        // cap tip follows the rotation (was drawn at the unrotated angle)
+        vec2  tip   = vec2(cos(bar_ang + u_rotation), sin(bar_ang + u_rotation)) * (pulse_r + bar_len);
+        float c_ang = clamp((half_w - ang_diff) * dist / pw + 0.5, 0.0, 1.0);
+        float c_in  = clamp((dist - pulse_r) / pw + 0.5, 0.0, 1.0);
+        float c_rad = clamp((pulse_r + bar_len - dist) / pw + 0.5, 0.0, 1.0);
+        float c_cap = clamp((cap_r - length(uv - tip)) / pw + 0.5, 0.0, 1.0);
+        float c_bar = c_ang * c_in * max(c_rad, c_cap);
+        float rel   = clamp((dist - pulse_r) / max(bar_len, 0.001), 0.0, 1.0);
+        color = mix(color, col(bar_val, freq_t0) * mix(1.0, 0.7, rel), c_bar);
 
-        if (dist < pulse_r) {
-            color = mix(bg * 0.6, color, 0.3);
-        }
+        float c_core = clamp((pulse_r - dist) / pw + 0.5, 0.0, 1.0);
+        color = mix(color, mix(bg * 0.6, color, 0.3), c_core);
 
         float sw = pulse_r * 0.04;
         float sd = dist - (pulse_r - sw);
@@ -391,13 +404,14 @@ void main() {
         float y_dist  = abs(v_uv.y - 0.5) * 2.0;
         float freq_t1 = float(bar_idx) / float(max(u_num_bars - 1, 1));
 
-        if (in_bar_slot(v_uv.x) && y_dist < bar_len) {
-            float rel = y_dist / max(bar_len, 0.001);
-            color = col(bar_val, freq_t1) * mix(1.0, 0.65, rel);
-        }
+        float pwx = fwidth(v_uv.x), pwy = max(fwidth(v_uv.y), 1e-6);
+        float c_x = bar_slot_cov(v_uv.x, pwx);
+        float c_y = clamp((bar_len - y_dist) / (2.0 * pwy) + 0.5, 0.0, 1.0);
+        float rel = clamp(y_dist / max(bar_len, 0.001), 0.0, 1.0);
+        color = mix(color, col(bar_val, freq_t1) * mix(1.0, 0.65, rel), c_x * c_y);
 
-        if (abs(v_uv.y - 0.5) < 0.002)
-            color = mix(color, u_pal2, 0.6);
+        float c_line = clamp((0.002 - abs(v_uv.y - 0.5)) / pwy + 0.5, 0.0, 1.0);
+        color = mix(color, mix(color, u_pal2, 0.6), c_line);
 
     // ── Linéaire ────────────────────────────────────────────────
     } else if (u_viz_type == 2) {
@@ -406,10 +420,11 @@ void main() {
         float bar_len = bar_val * u_max_bar_height;
         float freq_t2 = float(bar_idx) / float(max(u_num_bars - 1, 1));
 
-        if (in_bar_slot(v_uv.x) && v_uv.y < bar_len) {
-            float rel = v_uv.y / max(bar_len, 0.001);
-            color = col(bar_val, freq_t2) * mix(1.0, 0.55, rel);
-        }
+        float pwx = fwidth(v_uv.x), pwy = max(fwidth(v_uv.y), 1e-6);
+        float c_x = bar_slot_cov(v_uv.x, pwx);
+        float c_y = clamp((bar_len - v_uv.y) / pwy + 0.5, 0.0, 1.0);
+        float rel = clamp(v_uv.y / max(bar_len, 0.001), 0.0, 1.0);
+        color = mix(color, col(bar_val, freq_t2) * mix(1.0, 0.55, rel), c_x * c_y);
 
     // ── Oscilloscope / Lissajous ─────────────────────────────────
     } else if (u_viz_type == 3) {
